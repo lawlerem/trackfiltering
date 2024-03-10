@@ -1,0 +1,129 @@
+---
+title: "covariance_exploration"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{covariance_exploration}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(npmlangevin)
+```
+
+```{r}
+dims<- st_dimensions(
+    x = seq(-2, 2, by = 0.05),
+    y = seq(-2, 2, by = 0.05),
+    .raster = c("x", "y")
+)
+m<- matrix(0, nrow = dim(dims)[[1]], ncol = dim(dims)[[2]])
+r<- st_as_stars(
+  list(
+    gg = m,
+    g_dx = m,
+    g_dy = m,
+    dx_g = m,
+    dx_dx = m,
+    dx_dy = m,
+    dy_g = m,
+    dy_dx = m,
+    dy_dy = m
+  ),
+  dimensions = dims
+)
+x<- as.matrix(st_coordinates(dims))
+```
+
+```{r}
+cv_code<- 1
+cv_pars<- c(2, 0.5, 8.5)
+```
+
+```{r}
+obj<- MakeADFun(
+  data = list(
+    model = "covariance_exploration",
+    x = x,
+    cv_code = cv_code
+  ),
+  para = list(
+    working_cv_pars = log(cv_pars),
+    dummy = 0
+  ),
+  DLL = "npmlangevin_TMB"
+)
+```
+
+```{r}
+get_val<- function(name) {
+  return(
+    st_as_stars(
+      as.data.frame(cbind(obj$report()[[name]], x)),
+      dims = c("x", "y"),
+      coords = c(2, 3),
+      y_decreasing = FALSE
+    )[[1]]
+  )
+}
+
+r$gg<- get_val("gg")
+r$g_dx<- get_val("g_dx")
+r$g_dy<- get_val("g_dy")
+r$dx_g<- get_val("dx_g")
+r$dx_dx<- get_val("dx_dx")
+r$dx_dy<- get_val("dx_dy")
+r$dy_g<- get_val("dy_g")
+r$dy_dx<- get_val("dy_dx")
+r$dy_dy<- get_val("dy_dy")
+```
+
+```{r}
+gr_obj<- MakeADFun(
+  data = list(
+    model = "covariance_1d_deriv",
+    cv_code = cv_code,
+    cv_pars = cv_pars
+  ),
+  para = list(
+    x = 0
+  ),
+  DLL = "npmlangevin_TMB"
+)
+gr_opt<- nlminb(gr_obj$par, gr_obj$fn, gr_obj$gr)
+
+inflection_point<- abs(c(gr_opt$par))
+nnpoints<- expand.grid(
+  x = seq(-4, 4) * inflection_point,
+  y = seq(-4, 4) * inflection_point
+)
+nnpoints<- st_as_sf(
+  nnpoints,
+  coords = c(1, 2)
+)
+```
+
+```{r, fig.height=6, fig.width=6}
+rasters<- tm_shape(r) + tm_raster(
+    names(r),
+    style = "cont",
+    midpoint = 0,
+    interpolate = TRUE,
+    # palette = "viridis"
+    # palette = tmaptools::get_brewer_pal("PRGn")
+    palette = "PRGn"
+)
+neighbour_points<- tm_shape(nnpoints) + tm_dots()
+rasters + tm_facets(nrow = 3, ncol = 3, free.scales = FALSE) + neighbour_points + tm_layout(legend.outside = FALSE)
+```
+
+```{r}
+print(gr_opt)
+```

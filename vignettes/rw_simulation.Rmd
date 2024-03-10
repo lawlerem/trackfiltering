@@ -1,0 +1,271 @@
+---
+title: "rw_simulation"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{rw_simulation}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(npmlangevin)
+```
+
+```{r}
+class_string<- c("G", "3", "2", "1", "0", "A", "B")
+loc_class_K<- data.frame(
+  q = factor(
+    c("G", "3", "2", "1", "0", "A", "B"),
+    ordered = TRUE,
+    levels = c("G", "3", "2", "1", "0", "A", "B")
+  ),
+  x = c(0.1, 1, 1.54, 3.72, 13.51, 23.9, 44.22),
+  y = c(0.1, 1, 1.29, 2.55, 14.99, 22.0, 32.53)
+)
+loc_class_probs<- c(
+  "G" = 0.026,
+  "3" = 0.040,
+  "2" = 0.035,
+  "1" = 0.020,
+  "0" = 0.065,
+  "A" = 0.126,
+  "B" = 0.688
+)
+```
+
+```{r}
+nt<- 100
+nobs<- 40
+gamma<- 1
+
+obs_tau<- 1 * c(0.1, 0.1)
+obs_cor<- 0.0
+
+
+true_time<- sort(runif(nt))
+true_loc<- matrix(0, nrow = nt, ncol = 2)
+
+track_idx<- sort(sample(seq(nt), nobs, replace = TRUE))
+loc_class<- sample(loc_class_K$q, nobs, replace = TRUE, prob = loc_class_probs)
+
+loc_obs<- list(
+  coords = matrix(0, nrow = nobs, ncol = 2),
+  loc_class = as.numeric(loc_class) - 1,
+  track_idx = track_idx - 1,
+  K = as.matrix(loc_class_K[, c("x", "y")])
+)
+```
+
+```{r}
+obj<- MakeADFun(
+  data = list(
+    model = "random_walk",
+    true_time = true_time,
+    pings = list(
+      coords = matrix(0, nrow = nobs, ncol = 2),
+      loc_class = as.numeric(loc_class) - 1,
+      track_idx = track_idx - 1,
+      K = as.matrix(loc_class_K[, c("x", "y")])
+    )
+  ),
+  para = list(
+    true_loc = true_loc,
+    log_gamma = log(gamma),
+    working_obs_cov_pars = c(
+      log(obs_tau[[1]]),
+      qlogis(0.5 + 0.5 * obs_cor) ,
+      log(obs_tau[[2]])
+    )
+  ),
+  random = "true_loc",
+  DLL = "npmlangevin_TMB"
+)
+sim<- obj$simulate()
+
+
+fitobj<- MakeADFun(
+  data = list(
+    model = "random_walk",
+    true_time = true_time,
+    pings = list(
+      coords = sim$sim_obs,
+      loc_class = as.numeric(loc_class) - 1,
+      track_idx = track_idx - 1,
+      K = as.matrix(loc_class_K[, c("x", "y")])
+    )
+  ),
+  para = list(
+    true_loc = 0 * true_loc,
+    log_gamma = 0,
+    working_obs_cov_pars = 0 * c(
+      log(obs_tau[[1]]),
+      qlogis(0.5 + 0.5 * obs_cor) ,
+      log(obs_tau[[2]])
+    )
+  ),
+  random = "true_loc",
+  DLL = "npmlangevin_TMB"
+)
+opt<- nlminb(fitobj$par, fitobj$fn, fitobj$gr)
+sdr<- sdreport(fitobj, opt$par)
+sdr_est<- as.list(sdr, "Est")
+sdr_se<- as.list(sdr, "Std.")
+```
+
+```{r, fig.height = 6, fig.width = 8}
+obs_time<- true_time[track_idx]
+obs<-  sim$sim_obs
+loc_class<- loc_class
+sim_true<- sim$true_loc
+
+pred_true<- sdr_est$true_loc
+lower_true<- pred_true - 1.96 * sdr_se$true_loc
+upper_true<- pred_true + 1.96 * sdr_se$true_loc
+
+
+par(
+  mfrow = c(2, 1),
+  mar = c(0, 1.5, 4, 0),
+  oma = c(0, 0, 0, 5)
+)
+plot(
+  x = true_time,
+  y = sim_true[, 1],
+  xlim = c(0, 1),
+  ylim = c(
+    floor(min(c(
+      lower_true[, 1],
+      sim_true[, 1],
+      obs[, 1]
+    ))),
+    ceiling(max(c(
+      upper_true[, 1],
+      sim_true[, 1],
+      obs[, 1]
+    )))
+  ),
+  type = "l",
+  xlab = "",
+  ylab = "",
+  xaxt = "n",
+  yaxt = "n",
+  col = "red"
+)
+lines(
+  x = true_time,
+  y = lower_true[, 1],
+  col = "grey"
+)
+lines(
+  x = true_time,
+  y = pred_true[, 1],
+)
+lines(
+  x = true_time,
+  y = upper_true[, 1],
+  col = "grey"
+)
+points(
+  x = obs_time,
+  y = obs[, 1],
+  pch = 20,
+  col = loc_class
+)
+mtext(
+  "X coordinate",
+  side = 2,
+  line = 0.2
+)
+
+
+par(
+  mar = c(4, 1.5, 1, 0)
+)
+plot(
+  x = true_time,
+  y = sim_true[, 2],
+  xlim = c(0, 1),
+  ylim = c(
+    floor(min(c(
+      lower_true[, 2],
+      sim_true[, 2],
+      obs[, 2]
+    ))),
+    ceiling(max(c(
+      upper_true[, 2],
+      sim_true[, 2],
+      obs[, 2]
+    )))
+  ),
+  type = "l",
+  xlab = "",
+  ylab = "",
+  xaxt = "n",
+  yaxt = "n",
+  col = "red"
+)
+lines(
+  x = true_time,
+  y = lower_true[, 2],
+  col = "grey"
+)
+lines(
+  x = true_time,
+  y = pred_true[, 2],
+)
+lines(
+  x = true_time,
+  y = upper_true[, 2],
+  col = "grey"
+)
+points(
+  x = obs_time,
+  y = obs[, 2],
+  pch = 20,
+  col = loc_class
+)
+mtext(
+ "Time",
+  side = 1,
+  line = 1
+)
+mtext(
+  "Y coordinate",
+  side = 2,
+  line = 0.2
+)
+
+
+legend(
+  "topright",
+  xpd = NA,
+  legend = levels(loc_class),
+  col = seq_along(levels(loc_class)),
+  pch = 20,
+  title = "Loc. Class",
+  inset = c(-0.15, -0.5),
+  cex = 0.7
+)
+```
+
+```{r, fig.height = 8, fig.width = 8}
+plot(
+  sim$true_loc,
+  type = "l",
+  main = "Mean Estimated Path",
+  xlab = "X Coordinate",
+  ylab = "Y Coordinate",
+  col = "red"
+)
+lines(
+  x = pred_true[, 1],
+  y = pred_true[, 2]
+)
+```

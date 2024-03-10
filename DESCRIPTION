@@ -1,0 +1,30 @@
+Package: trackfiltering
+Title: Enable multiple imputation for movement data
+Version: 0.0.0.9000
+Authors@R:
+    person("Ethan", "Lawler", , "lawlerem@dal.ca", role = c("aut", "cre"))
+Description: Fits Gaussian processes to noisy animal data and enables multiple imputation using posterior samples.
+License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
+    license
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.1.9000
+Suggests:
+    knitr,
+    rmarkdown,
+    tmap
+VignetteBuilder: knitr
+Depends:
+    R (>= 2.10),
+    sf,
+    stars,
+    TMB
+LinkingTo:
+    Rcpp,
+    RcppEigen,
+    TMB
+Imports:
+    mvtnorm,
+    parallel,
+    Rcpp
+LazyData: true

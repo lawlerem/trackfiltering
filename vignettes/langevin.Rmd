@@ -1,0 +1,459 @@
+---
+title: "langevin"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{langevin}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(npmlangevin)
+set.seed(5108)
+```
+
+```{r}
+sim<- simulate(
+  nt = 500,
+  nping = 400,
+  boundary_sharpness = 0,
+  boundary_limit = 1,
+  pred_loc_delta = 0.5,
+  ping_tau = 0.1 * c(1, 1),
+  gamma = 0.1,
+  cv_code = 1,
+  cv_pars = c(0.2, 0.3, 1),
+  loc_class_probs = c(
+    G = 0.1,
+    `3` = 0.2,
+    `2` = 0.2,
+    `1` = 0.2,
+    `0` = 0.2,
+    A = 0.1,
+    B = 0
+  )
+)
+```
+
+```{r}
+print(
+  with(sim$tmap,{
+    tmap_arrange(
+      pred_field + track + pings,
+      pred_util + track + pings,
+      nrow = 2
+    )
+  })
+)
+```
+
+
+
+
+
+# If we know the observation pings and track neighbours can we estimate the parameters, true track, and utilization distribution?
+
+```{r}
+data<- sim$data
+para<- sim$para
+
+para$w<- 0 * sim$field$w
+para$true_coord<- sf::st_coordinates(sim$track)
+data$pings$coords<- sf::st_coordinates(sim$pings)
+
+para$boundary_x<- c(-3, 3)
+para$boundary_y<- c(-3, 3)
+para$working_boundary_sharpness<- -10
+
+data$field_neighbours<- lapply(
+  find_nearest_four(
+    sim$track,
+    sim$nn_graph
+  ),
+  `+`,
+  -1
+)
+
+map<- list(
+  boundary_x = as.factor(
+    rep(NA, length(para$boundary_x))
+  ),
+  boundary_y = as.factor(
+    rep(NA, length(para$boundary_y))
+  ),
+  working_boundary_sharpness = as.factor(
+    rep(NA, length(para$working_boundary_sharpness))
+  ),
+  working_cv_pars = as.factor(
+    c(1, 2, NA)
+  )
+)
+obj<- TMB::MakeADFun(
+  data = data,
+  para = para,
+  map = map,
+  random = c("w", "true_coord"),
+  DLL = "npmlangevin_TMB"
+)
+opt<- nlminb(obj$par, obj$fn, obj$gr)
+sdr<- TMB::sdreport(obj, opt$par)
+```
+
+```{r}
+pred<- st_sf(
+  data.frame(
+    w = as.list(sdr, "Est", report = TRUE)$pw,
+    se = as.list(sdr, "Std", report = TRUE)$pw,
+    sim$pred_locs
+  )
+)
+pred<- split(pred, pred$v)
+pred<- lapply(
+  pred,
+  function(x) {
+    x<- st_as_stars(x[c("w", "se")])
+    x<- st_sfc2xy(x)
+    return( x )
+  }
+)
+pred<- do.call(c, c(pred, list(along = "v")))
+st_dimensions(pred)$v$values<- c("gg", "dxdx", "dydy")
+names(st_dimensions(pred))[1:2]<- c("x", "y")
+attr(st_dimensions(pred), "raster")$dimensions<- c("x", "y")
+
+pred_field_tm<- tm_shape(pred["w"]) +
+  tm_raster(
+    style = "cont",
+    midpoint = 0,
+    interpolate = TRUE,
+    # palette = "viridis"
+    palette = "PRGn"
+  ) +
+  tm_facets(nrow = 1, ncol = 3, free.scales = TRUE) +
+  tm_layout(legend.outside = FALSE)
+
+pred_util<- exp(pred["w", , , "gg"])
+pred_util<- pred_util / sum(pred_util[["w"]])
+pred_util_tm<- tm_shape(pred_util) +
+  tm_raster(
+    style = "cont",
+    interpolate = TRUE,
+    palette = "Greens"
+  )
+
+
+pred_track<- sf::st_as_sf(
+  data.frame(
+    as.list(sdr, "Est")$true_coord,
+    as.list(sdr, "Std.")$true_coord
+  ),
+  coords = c(1, 2)
+)
+colnames(pred_track)[1:2]<- c("std_err_x", "std_err_y")
+pred_track_tm<- tm_shape(st_cast(st_combine(pred_track), "LINESTRING")) +
+  tm_lines(col = "black")
+
+print(
+  tmap_arrange(
+    pred_field_tm + pred_track_tm,
+    pred_util_tm + pred_track_tm,
+    nrow = 2
+  )
+)
+```
+
+```{r}
+sim$tmap$pred_field$tm_facets$free.scales<- TRUE
+diff_field<- pred["w"] - sim$pred_field["w"]
+
+print(
+  tmap_arrange(
+    sim$tmap$pred_field,
+    pred_field_tm,
+    nrow = 2
+  )
+)
+sim$tmap$pred_field$tm_facets$free.scales<- FALSE
+```
+
+
+
+
+
+# Full fitting procedure
+
+
+```{r}
+set.seed(5108)
+sim<- simulate(
+  nt = 500,
+  nping = 400,
+  boundary_sharpness = 0,
+  boundary_limit = 1,
+  pred_loc_delta = 0.5,
+  ping_tau = 0.1 * c(1, 1),
+  gamma = 0.1,
+  cv_code = 1,
+  cv_pars = c(0.2, 0.3, 1),
+  loc_class_probs = c(
+    G = 0.1,
+    `3` = 0.2,
+    `2` = 0.2,
+    `1` = 0.2,
+    `0` = 0.2,
+    A = 0.1,
+    B = 0
+  )
+)
+```
+
+
+## Fit a random walk
+
+```{r}
+filtered_locs<- fit_rw(
+  locations = sim$pings,
+  delta_t = 0.1
+)
+```
+
+```{r}
+filtered_tm<- tm_shape(
+    st_cast(st_combine(filtered_locs$track), "LINESTRING")
+  ) + tm_lines(col = "red")
+filtered_tm + sim$tmap$track + sim$tmap$pings
+```
+
+
+
+## Fit using initial guess at parameters and random walk estimated locations fixed
+
+```{r}
+library(parallel)
+fits<- lapply(
+  c(0.3, 0.5, 0.75, 1),
+  FUN = function(rho, ...) {
+    track_estimate<- filtered_locs
+    cv_code<- 1
+    initial_cv_pars<- c(1, 0.2)
+    bbox<- 1.1 * sf::st_bbox(track_estimate$pings)
+
+    g<- make_nn_graph(
+      x = bbox[c("xmin", "xmax")],
+      y = bbox[c("ymin", "ymax")],
+      cv_pars = initial_cv_pars,
+      cv_code = cv_code
+    )
+    track_nn<- find_nearest_four(
+      track_estimate$track,
+      g
+    )
+    data<- list(
+      model = "langevin_diffusion",
+      cv_code = cv_code,
+      g = list(
+        stars::st_get_dimension_values(g$stars, "x"),
+        stars::st_get_dimension_values(g$stars, "y"),
+        lapply(lapply(g$graph, `[[`, 1), `+`, -1),
+        lapply(lapply(g$graph, `[[`, 2), `+`, -1)
+      ),
+      pwg = list(
+        var = integer(0),
+        coord = matrix(0, nrow = 0, ncol = 2),
+        parents = list()
+      ),
+      field_neighbours = lapply(track_nn, `+`, -1),
+      true_time = track_estimate$track$t,
+      pings = list(
+        coords = unname(sf::st_coordinates(track_estimate$pings)),
+        loc_class = as.numeric(track_estimate$pings$q) - 1,
+        track_idx = match(track_estimate$pings$t, track_estimate$track$t) - 1,
+        K = as.matrix(loc_class_K[, c("x", "y")])
+      )
+    )
+    para<- list(
+      boundary_x = bbox[c("xmin", "xmax")],
+      boundary_y = bbox[c("ymin", "ymax")],
+      working_boundary_sharpness = log(0),
+      working_cv_pars = log(initial_cv_pars),
+      w = g$stars$w,
+      true_coord = sf::st_coordinates(track_estimate$track),
+      log_gamma = track_estimate$parameters["log_gamma"],
+      working_ping_cov_pars = track_estimate$parameters[names(track_estimate$parameters) == "working_obs_cov_pars"]
+    )
+    map<- list(
+      boundary_x = as.factor(
+        c(NA, NA)
+      ),
+      boundary_y = as.factor(
+        c(NA, NA)
+      ),
+      working_boundary_sharpness = as.factor(
+        NA
+      ),
+      working_cv_pars = as.factor(
+        c(1, NA)
+      )
+      # true_coord = as.factor(
+      #   matrix(NA, nrow = nrow(para$true_coord), ncol = ncol(para$true_coord))
+      # ),
+      # log_gamma = as.factor(NA),
+      # working_ping_cov_pars  = as.factor(
+      #   rep(NA, length(para$working_ping_cov_pars))
+      # )
+    )
+    obj<- TMB::MakeADFun(
+      data = data,
+      para = para,
+      map = map,
+      random = c("w", "true_coord"),
+      DLL = "npmlangevin_TMB"
+    )
+    opt<- nlminb(obj$par, obj$fn, obj$gr)
+    sdr<- TMB::sdreport(obj, opt$par)
+
+    pred<- st_sf(
+      data.frame(
+        w = as.list(sdr, "Est", report = TRUE)$pw,
+        se = as.list(sdr, "Std", report = TRUE)$pw,
+        sim$pred_locs
+      )
+    )
+    pred<- split(pred, pred$v)
+    pred<- lapply(
+      pred,
+      function(x) {
+        x<- st_as_stars(x[c("w", "se")])
+        x<- st_sfc2xy(x)
+        return( x )
+      }
+    )
+    pred<- do.call(c, c(pred, list(along = "v")))
+    st_dimensions(pred)$v$values<- c("gg", "dxdx", "dydy")
+    names(st_dimensions(pred))[1:2]<- c("x", "y")
+    attr(st_dimensions(pred), "raster")$dimensions<- c("x", "y")
+
+    pred_field_tm<- tm_shape(pred["w"]) +
+      tm_raster(
+        style = "cont",
+        midpoint = 0,
+        interpolate = TRUE,
+        # palette = "viridis"
+        palette = "PRGn"
+      ) +
+      tm_facets(nrow = 1, ncol = 3, free.scales = TRUE) +
+      tm_layout(legend.outside = FALSE)
+
+    pred_util<- exp(pred["w", , , "gg"])
+    pred_util<- pred_util / sum(pred_util[["w"]])
+    pred_util_tm<- tm_shape(pred_util) +
+      tm_raster(
+        style = "cont",
+        interpolate = TRUE,
+        palette = "Greens"
+      )
+
+    
+    return(
+      list(
+        rho = rho,
+        obj = obj,
+        opt = opt,
+        sdr = sdr,
+        pred = pred,
+        pred_tm = pred_tm,
+        pred_util = pred_util,
+        pred_util_tm = pred_util_tm
+      )
+    )
+  },
+  mc.cores = 2
+)
+```
+
+
+## Update graph and fit again
+
+```{r}
+updated_cv_pars<- c(exp(opt$par), 1.5)
+g<- make_nn_graph(
+  x = bbox[c("xmin", "xmax")],
+  y = bbox[c("ymin", "ymax")],
+  cv_pars = exp(opt$par),
+  cv_code = cv_code
+)
+track_nn<- find_nearest_four(
+  track_estimate$track,
+  g
+)
+
+data<- list(
+  model = "langevin_diffusion",
+  cv_code = cv_code,
+  g = list(
+    stars::st_get_dimension_values(g$stars, "x"),
+    stars::st_get_dimension_values(g$stars, "y"),
+    lapply(lapply(g$graph, `[[`, 1), `+`, -1),
+    lapply(lapply(g$graph, `[[`, 2), `+`, -1)
+  ),
+  pwg = list(
+    var = integer(0),
+    coord = matrix(0, nrow = 0, ncol = 2),
+    parents = list()
+  ),
+  field_neighbours = lapply(track_nn, `+`, -1),
+  true_time = track_estimate$track$t,
+  pings = list(
+    coords = unname(sf::st_coordinates(track_estimate$pings)),
+    loc_class = as.numeric(track_estimate$pings$q) - 1,
+    track_idx = match(track_estimate$pings$t, track_estimate$track$t) - 1,
+    K = as.matrix(loc_class_K[, c("x", "y")])
+  )
+)
+para<- list(
+  boundary_x = bbox[c("xmin", "xmax")],
+  boundary_y = bbox[c("ymin", "ymax")],
+  working_boundary_sharpness = log(0),
+  working_cv_pars = log(initial_cv_pars),
+  w = g$stars$w,
+  true_coord = unname(sf::st_coordinates(track_estimate$track)),
+  log_gamma = track_estimate$parameters["log_gamma"],
+  working_ping_cov_pars = track_estimate$parameters[names(track_estimate$parameters) == "working_obs_cov_pars"]
+)
+map<- list(
+  boundary_x = as.factor(
+    c(NA, NA)
+  ),
+  boundary_y = as.factor(
+    c(NA, NA)
+  ),
+  working_boundary_sharpness = as.factor(
+    NA
+  ),
+  working_cv_pars = as.factor(
+    c(1, 2, NA)
+  ),
+  true_coord = as.factor(
+    matrix(NA, nrow = nrow(para$true_coord), ncol = ncol(para$true_coord))
+  ),
+  log_gamma = as.factor(NA),
+  working_ping_cov_pars  = as.factor(
+    rep(NA, length(para$working_ping_cov_pars))
+  )
+)
+obj<- TMB::MakeADFun(
+  data = data,
+  para = para,
+  map = map,
+  random = c("w", "true_coord"),
+  DLL = "npmlangevin_TMB"
+)
+opt<- nlminb(obj$par, obj$fn, obj$gr)
+```
