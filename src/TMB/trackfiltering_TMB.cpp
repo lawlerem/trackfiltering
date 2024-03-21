@@ -71,22 +71,24 @@ Type objective_function<Type>::operator() () {
   // ADREPORT(ping_coordinates);
 
   // Location Ping Likelihood
-  PARAMETER_VECTOR(working_ping_parameters);
-  vector<Type> ping_parameters = log(1 + exp(working_ping_parameters));
-  ping_parameters(1) = 2 * invlogit(working_ping_parameters(1)) - 1.0;
-  REPORT(ping_parameters);
-  ADREPORT(ping_parameters);
+  PARAMETER(working_ping_correlation);
+  Type ping_correlation = 2 * invlogit(working_ping_correlation) - 1.0;
+  REPORT(ping_correlation);
+  ADREPORT(ping_correlation);
+
+  PARAMETER_VECTOR(working_ping_scaling);
+  vector<Type> ping_scaling = exp(working_ping_scaling);
+  REPORT(ping_scaling);
+  ADREPORT(ping_scaling);
 
   matrix<Type> ping_covariance(2, 2);
-  ping_covariance << pow(ping_parameters(0), 2), ping_parameters(1) * ping_parameters(0) * ping_parameters(2),
-    ping_parameters(1) * ping_parameters(0) * ping_parameters(2), pow(ping_parameters(2), 2);
+  ping_covariance << 1.0, ping_correlation, ping_correlation, 1.0;
 
-  DATA_MATRIX(quality_class_adjustment);
-  vector<MVNORM_t<Type> > quality_class_distribution(quality_class_adjustment.rows());
-  vector<Type> quality_class_logdet(quality_class_adjustment.rows());
+  vector<MVNORM_t<Type> > quality_class_distribution(ping_scaling.size());
+  vector<Type> quality_class_logdet(ping_scaling.size());
   for(int quality_class = 0; quality_class < quality_class_distribution.size(); quality_class++) {
     matrix<Type> diagonal_adjustment(2, 2);
-    diagonal_adjustment << quality_class_adjustment(quality_class, 0), 0.0, 0.0, quality_class_adjustment(quality_class, 1);
+    diagonal_adjustment << ping_scaling(quality_class), 0.0, 0.0, ping_scaling(quality_class);
     matrix<Type> quality_class_covariance = diagonal_adjustment * ping_covariance * diagonal_adjustment;
     quality_class_distribution(quality_class) = MVNORM_t<Type>(quality_class_covariance);
     quality_class_logdet(quality_class) = atomic::logdet(diagonal_adjustment);

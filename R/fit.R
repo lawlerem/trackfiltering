@@ -12,7 +12,6 @@
 #' @param ping_robust_code Robustification type: 0 = ML, 1 = arctan, 2 = smooth semi-Huber
 #' @param starting_move_sd Starting values for std. dev. of movement velocity components
 #' @param starting_move_range Starting values for movement range parameter
-#' @param starting_ping_sd Starting values for observation error std. dev. (ARGOS class 3) (measured in m)
 #' @param starting_ping_cor Starting values for observation error ellipse correlation
 #' @param fix_move_sd Should these parameters be held fixed in the estimation?
 #' @param fix_move_range Should these parameters be held fixed in the estimation?
@@ -38,7 +37,6 @@ fit_track<- function(
   ping_robust_code = 2,
   starting_move_sd = c(12, 12),
   starting_move_range = c(3, 3),
-  starting_ping_sd = c(500, 500),
   starting_ping_cor = 0,
   fix_move_sd = FALSE,
   fix_move_range = TRUE,
@@ -122,20 +120,6 @@ fit_track<- function(
   )
   covariance_pairs<- unique(covariance_pairs)
 
-
-  default_class_starting_values<- units::set_units(starting_ping_sd, "m")
-  default_class_starting_values<- units::set_units(
-    default_class_starting_values,
-    units(sf::st_distance(pings[1, ])),
-    mode = "standard"
-  )
-  default_class_starting_values<- log(exp(units::drop_units(default_class_starting_values)) - 1)
-  default_class_starting_values<- c(
-    default_class_starting_values[[1]],
-    starting_ping_cor,
-    default_class_starting_values[[2]]
-  )
-
   observed_pings<- list(
     coordinate = sf::st_coordinates(pings),
     index = seq_along(ping_time) - 1,
@@ -152,10 +136,9 @@ fit_track<- function(
     covariance_pairs = as.matrix(covariance_pairs) - 1, # List of all node pairs whose covariance needs to be computed
     track_robustness = track_robustness,
     track_robust_code = track_robust_code,
-    quality_class_adjustment = as.matrix(loc_class_K[, 2:3]),
     observed_pings = observed_pings,
     ping_robustness = ping_robustness,
-    ping_robust_code = 0,
+    ping_robust_code = qlogis(0.5 * (starting_ping_cor + 1)),
     posterior_simulation = FALSE,
     posterior_coordinate_mean = 0.0 * observed_pings$coordinate,
     posterior_coordinate_sd = 0.0 * observed_pings$coordinate
@@ -175,7 +158,8 @@ fit_track<- function(
       c(log(exp(starting_move_sd[[1]]) - 1), log(exp(starting_move_range[[1]]) - 1), log(exp(0.5) - 1)),
       c(log(exp(starting_move_sd[[2]]) - 1), log(exp(starting_move_range[[2]]) - 1), log(exp(0.5) - 1))
     ),
-    working_ping_parameters = default_class_starting_values
+    working_ping_correlation = 0,
+    working_ping_scaling = rep(0, nrow(loc_class_K))
   )
 
   map<- list()
@@ -189,11 +173,10 @@ fit_track<- function(
       c(ifelse(fix_move_sd, NA, 2), ifelse(fix_move_range, NA, 4), 6)
     ))
   } else {}
-  map$working_ping_parameters<- factor(c(
-    ifelse(fix_ping_sd, NA, 1),
-    ifelse(fix_ping_cor, NA, 2),
-    ifelse(fix_ping_sd, NA, 3)
-  ))
+  map$working_ping_correlation<- factor(ifelse(fix_ping_cor, NA, 2))
+  map$working_ping_scaling<- seq(nrow(loc_class_K))
+  map$working_ping_scaling[table(pings$quality_class) < 1]<- NA
+  map$working_ping_scaling<- as.factor(map$working_ping_scaling)
 
   # Fit non-robust ML to get starting values
   obj<- TMB::MakeADFun(
@@ -227,6 +210,9 @@ fit_track<- function(
     good_obj<- obj
     good_opt<- opt
     for( r in r_seq ) {
+      # 1.) Apply sliding median filter to estimated track
+      # 2.) Get robust estimate of parameters given track
+      # 3.) Get estimate track and parameters with better starting values
       track_estimate<- sdr_est$track_coordinates
       track_estimate[-c(seq(floor(k/2)), seq(floor(k/2)) + nrow(track_estimate) - floor(k/2)), ]<- zoo::rollmedian(
         track_estimate,
@@ -239,8 +225,40 @@ fit_track<- function(
         end_points = sdr_est$end_points,
         track_coordinates = track_estimate,
         working_covariance_parameters = sdr_est$working_covariance_parameters,
-        working_ping_parameters = sdr_est$working_ping_parameters
+        working_ping_correlation = sdr_est$working_ping_correlation,
+        working_ping_scaling = sdr_est$working_ping_scaling
       )
+      map$track_coordinates<- as.factor(matrix(NA, nrow = nrow(track_estimate), ncol = ncol(track_estimate)))
+      obj<- TMB::MakeADFun(
+        data = data,
+        para = para,
+        map = map,
+        random = "track_coordinates",
+        DLL = "trackfiltering_TMB",
+        silent = silent
+      )
+      opt<- nlminb(
+        obj$par,
+        obj$fn,
+        obj$gr,
+        ...
+      )
+      sdr<- sdreport(
+        obj,
+        opt$par,
+        ignore.parm.uncertainty = TRUE,
+        getReportCovariance = FALSE,
+        skip.delta.method = TRUE
+      )
+      sdr_est<- as.list(sdr, "Est", report = FALSE)
+      para<- list(
+        end_points = sdr_est$end_points,
+        track_coordinates = sdr_est$track_coordinates,
+        working_covariance_parameters =  sdr_est$working_covariance_parameters,
+        working_ping_correlation = sdr_est$working_ping_correlation,
+        working_ping_scaling = sdr_est$working_ping_scaling
+      )
+      map$track_coordinates<- NULL
       obj<- TMB::MakeADFun(
         data = data,
         para = para,

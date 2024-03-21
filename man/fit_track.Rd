@@ -17,7 +17,6 @@ fit_track(
   ping_robust_code = 2,
   starting_move_sd = c(12, 12),
   starting_move_range = c(3, 3),
-  starting_ping_sd = c(500, 500),
   starting_ping_cor = 0,
   fix_move_sd = FALSE,
   fix_move_range = TRUE,
@@ -52,8 +51,6 @@ fit_track(
 \item{starting_move_sd}{Starting values for std. dev. of movement velocity components}
 
 \item{starting_move_range}{Starting values for movement range parameter}
-
-\item{starting_ping_sd}{Starting values for observation error std. dev. (ARGOS class 3) (measured in m)}
 
 \item{starting_ping_cor}{Starting values for observation error ellipse correlation}
 
