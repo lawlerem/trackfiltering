@@ -40,7 +40,8 @@ plot_track_profile<- function(track, x_se, y_se, ping_weights, lower_weight_limi
     max(all_coordinates[, 2])
   )
   ylim<- ylim + c(-1, 1) * 0.05 * diff(ylim)
-  point_size<- point_size_scale * 0.5 * log(loc_class_K[, 2] + 3)[pings$quality_class]
+  default_sizes<- c(0.5657, 0.6931, 0.7565, 0.9525, 1.102, 1.6461, 1.9274)
+  point_size<- point_size_scale * default_sizes[pings$quality_class]
 
   plot(
     x = track$time,
@@ -87,7 +88,7 @@ plot_track_profile<- function(track, x_se, y_se, ping_weights, lower_weight_limi
     x = "topright",
     legend = c("G", 3, 2, 1, 0, "A", "B"),
     col = seq(7),
-    pt.cex = 2 * log(loc_class_K[, 2] + 1.5),
+    pt.cex = default_sizes,
     pch = 20
   )
 
@@ -155,7 +156,7 @@ plot_track<- function(track, ping_weights, lower_weight_limit = 0.01, point_size
   } else {}
   pings<- track$pings
   track<- track$track
-  point_size<- 0.2 * log(loc_class_K[, 2] + 3)
+  point_size<- c(0.5657, 0.6931, 0.7565, 0.9525, 1.102, 1.6461, 1.9274)
 
   if( missing(ping_weights) ) {
     ping_weights<- rep(1, nrow(pings))
@@ -305,7 +306,8 @@ plot_posterior_track_profiles<- function(
     max(all_coordinates[, 2])
   )
   ylim<- ylim + c(-1, 1) * 0.05 * diff(ylim)
-  point_size<- point_size_scale * 0.5 * log(loc_class_K[, 2] + 3)[pings$quality_class]
+  default_sizes<- c(0.5657, 0.6931, 0.7565, 0.9525, 1.102, 1.6461, 1.9274)
+  point_size<- point_size_scale * default_sizes[pings$quality_class]
 
   plot(
     x = track$time,
@@ -347,7 +349,7 @@ plot_posterior_track_profiles<- function(
     x = "topright",
     legend = c("G", 3, 2, 1, 0, "A", "B"),
     col = seq(7),
-    pt.cex = 2 * log(loc_class_K[, 2] + 1.5),
+    pt.cex = default_sizes,
     pch = 20
   )
 

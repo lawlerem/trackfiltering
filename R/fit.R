@@ -1,3 +1,49 @@
+#' Split a track into subsets
+#'
+#' @param pings An sf data.frame with point geometries, a "time" column, and a "quality class" column
+#' @param track_time Optional vector of times to use for modeling the true locations. Defaults to observed ping times.
+#' @param split_percentage What percentage of the observed data should each split contain?
+#' @param split_overlap How much should each split overlap adjacent splits? Each split will be extended to cover the overlap.
+#'
+#' @return A list giving the splits of the pings and track times.
+#'
+#' @export
+split_track<- function(
+  pings,
+  track_time,
+  split_percentage = 1,
+  split_overlap = 0
+) {
+  left_quantiles<- seq(0, 1 - split_percentage, by = split_percentage) - split_overlap / 2
+  left_quantiles<- sapply(left_quantiles, function(x) max(c(0, x)))
+  right_quantiles<- seq(split_percentage, 1, by = split_percentage) + split_overlap / 2
+  right_quantiles<- sapply(right_quantiles, function(x) min(c(x, 1)))
+
+  ping_time<- pings$time
+  left_points<- quantile(ping_time, left_quantiles)
+  right_points<- quantile(ping_time, right_quantiles)
+
+  if( missing(track_time) ) {
+    track_time<- ping_time
+  } else {}
+  track_time<- sort(unique(track_time))
+
+  splits<- lapply(
+    seq_along(left_points),
+    function(split) {
+      ping_idx<- (left_points[split] <= pings$time) & (pings$time <= right_points[split])
+      track_time_idx<- (left_points[split] <= track_time) & (track_time <= right_points[split])
+      return(
+        list(
+          pings = pings[ping_idx, ],
+          track_time = track_time[track_time_idx]
+        )
+      )
+    }
+  )
+  return(splits)
+}
+
 #' Fit a Gaussian process model to an sf data.frame of location pings.
 #'
 #' @param pings An sf data.frame with  point geometries, a "time" column, and a "quality_class" column
@@ -159,7 +205,7 @@ fit_track<- function(
       c(log(exp(starting_move_sd[[2]]) - 1), log(exp(starting_move_range[[2]]) - 1), log(exp(0.5) - 1))
     ),
     working_ping_correlation = 0,
-    working_ping_scaling = rep(0, nrow(loc_class_K))
+    working_ping_scaling = rep(0, 7)
   )
 
   map<- list()
@@ -174,7 +220,7 @@ fit_track<- function(
     ))
   } else {}
   map$working_ping_correlation<- factor(ifelse(fix_ping_cor, NA, 2))
-  map$working_ping_scaling<- seq(nrow(loc_class_K))
+  map$working_ping_scaling<- seq(7)
   map$working_ping_scaling[table(pings$quality_class) < 1]<- NA
   map$working_ping_scaling<- as.factor(map$working_ping_scaling)
 
