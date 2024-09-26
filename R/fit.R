@@ -1,28 +1,30 @@
 #' Fit a model to a movement track
 #' 
 #' @param pings An sf data frame with a POSIX or numeric column named "date", an optional factor column named "class", and point geometries.
-#' @param interpolate_time A vector of times at which to interpolate locations.
+#' @param interpolation_time A vector of times at which to interpolate locations.
 #' @param nodes A vector of times used as nodes in the underlying spline.
 #' @param robust_schedule See robustifyRTMB::robustly_optimize
 #' @param robust_function See robustifyRTMB::robustify
-#' @param robust_bandwidth See robustifyRTMB::robustly_optimize
+#' @param robust_bandwidth See robustifyRTMB::robustly_optimize. Should be specified as a numeric values measured in units given by the time_units arguments.
 #' @param independent_coordinates If true, then observation ellipses are assumed to have
 #'   independent axes.
 #' @param common_coordinate_correlation If true, then observation ellipses for different
 #'   quality classes are assumed to have the same correlation structure.
 #' @param time_units Which time units should be used? Mostly matters for numerical stability.
+#' @param fix_range If set to a value, the range parameter will be fixed to the given value.
 #'
 #' @export
 fit_track<- function(
         pings,
         interpolation_time = numeric(0),
-        nodes = time,
+        nodes = unique(pings$date),
         robust_schedule = seq(0, 0.05, by = 0.01),
         robust_function = "ll",
-        robust_bandwidth = 0.001 * diff(range(time)),
+        robust_bandwidth = 1,
         independent_coordinates = FALSE,
         common_coordinate_correlation = TRUE,
-        time_units = "days"
+        time_units = "days",
+        fix_range
     ) {
     coordinates<- sf::st_coordinates(pings)
     time<- pings$date
@@ -59,14 +61,26 @@ fit_track<- function(
     spline<- nnspline::create_nnspline(
         x = c(time, interpolation_time),
         nodes = nodes,
-        n_parents = 5
+        n_parents = 4,
+        correlation_function = function(x1, x2, p) {
+            d<- sqrt(sum((x1 - x2)^2))
+            range<- p[[1]]
+            exp( -(d / range)^2 )
+        }
     )
     n_coordinates<- ncol(coordinates)
     n_class<- length(levels(class))
 
+    if( !missing(fix_range) ) {
+        fix_range<- log(fix_range)
+        map_range<- as.factor(c(NA, NA))
+    } else {
+        fix_range<- 0
+        map_range<- as.factor(c(1, 2))
+    }
     pars<- list(
         working_variance = numeric(n_coordinates),
-        working_range = numeric(n_coordinates),
+        working_range = fix_range + numeric(n_coordinates),
         node_values = cbind(
             spline$node_values,
             spline$node_values
@@ -89,6 +103,7 @@ fit_track<- function(
     )
 
     map<- list(
+        working_range = map_range,
         working_ping_diagonal = matrix(
             seq_along(pars$working_ping_diagonal),
             nrow = nrow(pars$working_ping_diagonal)
@@ -120,7 +135,7 @@ fit_track<- function(
         smooth = "node_values",
         nodes = spline$nodes,
         robust_schedule = robust_schedule,
-        bandwidth = robust_bandwidth
+        bandwidth = as.difftime(robust_bandwidth, units = time_units) |> as.numeric()
     )
 
     report<- fit$obj$report()
