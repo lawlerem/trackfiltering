@@ -7,17 +7,20 @@
 fit_track(
   pings,
   interpolation_time = numeric(0),
-  nodes = time,
+  nodes = unique(pings$date),
   robust_schedule = seq(0, 0.05, by = 0.01),
   robust_function = "ll",
-  robust_bandwidth = 0.001 * diff(range(time)),
+  robust_bandwidth = 1,
   independent_coordinates = FALSE,
   common_coordinate_correlation = TRUE,
-  time_units = "days"
+  time_units = "days",
+  fix_range
 )
 }
 \arguments{
 \item{pings}{An sf data frame with a POSIX or numeric column named "date", an optional factor column named "class", and point geometries.}
+
+\item{interpolation_time}{A vector of times at which to interpolate locations.}
 
 \item{nodes}{A vector of times used as nodes in the underlying spline.}
 
@@ -25,7 +28,7 @@ fit_track(
 
 \item{robust_function}{See robustifyRTMB::robustify}
 
-\item{robust_bandwidth}{See robustifyRTMB::robustly_optimize}
+\item{robust_bandwidth}{See robustifyRTMB::robustly_optimize. Should be specified as a numeric values measured in units given by the time_units arguments.}
 
 \item{independent_coordinates}{If true, then observation ellipses are assumed to have
 independent axes.}
@@ -35,7 +38,7 @@ quality classes are assumed to have the same correlation structure.}
 
 \item{time_units}{Which time units should be used? Mostly matters for numerical stability.}
 
-\item{interpolate_time}{A vector of times at which to interpolate locations.}
+\item{fix_range}{If set to a value, the range parameter will be fixed to the given value.}
 }
 \description{
 Fit a model to a movement track
