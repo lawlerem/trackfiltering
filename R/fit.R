@@ -12,6 +12,7 @@
 #'   quality classes are assumed to have the same correlation structure.
 #' @param time_units Which time units should be used? Mostly matters for numerical stability.
 #' @param fix_range If set to a value, the range parameter will be fixed to the given value.
+#' @param correlation_function See nnspline::create_nnspline
 #'
 #' @export
 fit_track<- function(
@@ -24,7 +25,13 @@ fit_track<- function(
         independent_coordinates = FALSE,
         common_coordinate_correlation = TRUE,
         time_units = "days",
-        fix_range
+        fix_range,
+        correlation_function = function(x1, x2, p) {
+            d<- sqrt(sum((x1 - x2)^2))
+            range<- p[[1]]
+            # (0.05 * (d == 0) + 0.95 ) * exp( -(d / range)^2 )
+            exp( -(d / range)^2 )
+        }
     ) {
     coordinates<- sf::st_coordinates(pings)
     time<- pings$date
@@ -62,11 +69,7 @@ fit_track<- function(
         x = c(time, interpolation_time),
         nodes = nodes,
         n_parents = 4,
-        correlation_function = function(x1, x2, p) {
-            d<- sqrt(sum((x1 - x2)^2))
-            range<- p[[1]]
-            exp( -(d / range)^2 )
-        }
+        correlation_function = correlation_function
     )
     n_coordinates<- ncol(coordinates)
     n_class<- length(levels(class))
