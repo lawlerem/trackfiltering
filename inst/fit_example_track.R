@@ -1,7 +1,7 @@
 library(sf)
 # library(trackfiltering)
 devtools::load_all()
-debug(robustifyRTMB::robustly_optimize)
+# debug(fit_track)
 
 track<- sf::st_read("example_track.gpkg")
 fit<- trackfiltering::fit_track(
@@ -16,16 +16,17 @@ fit<- trackfiltering::fit_track(
         max(track$date),
         by = "1 days"
     ),
-    robust_schedule = seq(0, 0.15, by = 0.01),
+    robust_schedule = 0.05,
+    robust_function = "ssh",
     independent_coordinates = TRUE,
-    robust_bandwidth = 1,
+    robust_bandwidth = 2,
     fix_range = 8,
     correlation_function = function(x1, x2, p) {
         d<- sqrt(sum((x1 - x2)^2))
         range<- p[[1]]
         poly<- 1 + sqrt(5) * (d / range) + (5 / 3) * (d / range)^2
-        return(poly * exp( -sqrt(5) * (d / range)))
-        # return(exp(-(d/range)^2))
+        # return(poly * exp( -sqrt(5) * (d / range)))
+        return(exp(-(d/range)^2))
     }
 )
 
@@ -37,6 +38,19 @@ by(
     fit$pings$class,
     function(x) c(round(summary(x), 2), n = length(x))
 )
+# report<- obj$report()
+# report$Sigma_q
+# by(
+#     report$weights,
+#     environment(nll)$class,
+#     summary
+# )
+# plot.ts(
+#     cbind(
+#         report$ping_pred,
+#         environment(nll)$pings |> sf::st_coordinates()
+#     )[, c(1, 3, 2, 4)]
+# )
 
 est<- sf::st_coordinates(fit$interpolation$est)
 se<- sf::st_coordinates(fit$interpolation$se)

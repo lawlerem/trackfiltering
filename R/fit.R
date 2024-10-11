@@ -130,16 +130,113 @@ fit_track<- function(
     map<- lapply(map, as.factor)
 
     environment(nll)<- environment()
-    fit<- robustifyRTMB::robustly_optimize(
+    # fit<- robustifyRTMB::robustly_optimize(
+    #     nll,
+    #     pars,
+    #     random = "node_values",
+    #     map = map,
+    #     smooth = "node_values",
+    #     nodes = spline$nodes,
+    #     robust_schedule = robust_schedule,
+    #     bandwidth = as.difftime(robust_bandwidth, units = time_units) |> as.numeric()
+    # )
+
+    ### Bespoke robust optimization
+    weight_fun<- Vectorize(
+        function(d, bandwidth) exp( -d / bandwidth ),
+        "d"
+    )
+    d<- dist(
+        spline$nodes,
+        diag = TRUE,
+        upper = TRUE
+    )
+    d<- as.matrix(d)
+    bandwidth<- as.difftime(robust_bandwidth, units = time_units) |> as.numeric()
+    within<- d <= (2 * bandwidth)
+    weights<- 0 * d
+    weights[within]<- weight_fun(d[within], bandwidth)
+    weights<- sweep(
+        weights,
+        MARGIN = 1,
+        STATS = rowSums(weights),
+        FUN = "/"
+    )
+    tighten<- function(node_values) weights %*% cbind(node_values)
+    pars<- c(
+        pars,
+        list(
+            robustness = 0
+        )
+    )
+    pars<- as.relistable(pars)
+    robust_map<- list(
+        robustness = as.factor(NA)
+    )
+    spline_map<- list(
+        node_values = as.factor(
+            rep(
+                NA,
+                length(pars$node_values)
+            )
+        )
+    )
+    obj<- RTMB::MakeADFun(
         nll,
         pars,
+        map = c(map, robust_map),
         random = "node_values",
-        map = map,
-        smooth = "node_values",
-        nodes = spline$nodes,
-        robust_schedule = robust_schedule,
-        bandwidth = as.difftime(robust_bandwidth, units = time_units) |> as.numeric()
+        silent = TRUE
     )
+    opt<- with(obj, nlminb(par, fn, gr))
+    fitpar<- obj$env$parList()
+    fitpar$robustness<- max(robust_schedule)
+    fitpar$node_values<- tighten(fitpar$node_values)
+    obj<- RTMB::MakeADFun(
+        nll,
+        fitpar,
+        map = c(spline_map, map, robust_map),
+        random = "node_values",
+        silent = TRUE
+    )
+    opt<- with(obj, nlminb(par, fn, gr))
+    fitpar<- obj$env$parList()
+    report<- obj$report()
+    residuals<- report$ping_pred - environment(nll)$coordinates
+    class_sd<- by(
+        residuals,
+        environment(nll)$class,
+        function(x) {
+            return(robust::covRob(x)$cov)
+        }
+    )
+
+    fitpar$working_ping_diagonal<- sapply(
+        class_sd,
+        function(x) return(log(sqrt(c(x[1, 1], x[2, 2]))))
+    )
+    fitpar$ping_off_diagonal[]<- 0
+
+    obj<- RTMB::MakeADFun(
+        nll,
+        fitpar,
+        map = c(map, robust_map),
+        random = "node_values",
+        silent = TRUE
+    )
+    opt<- with(obj, nlminb(par, fn, gr))
+    fitpar<- obj$env$parList()
+    fit<- list(
+        par = fitpar,
+        obj = obj,
+        opt = opt,
+        sdr = RTMB::sdreport(
+            obj,
+            opt$par,
+            getJointPrecision = TRUE
+        )
+    )
+    ###
 
     report<- fit$obj$report()
     sdr_est<- c(
