@@ -1,9 +1,27 @@
 library(sf)
-# library(trackfiltering)
-devtools::load_all()
-# debug(fit_track)
+library(trackfiltering)
+crs<- readRDS("track_crs.rds")
+tracks<- sf::st_read("tracks.gpkg") |>
+    sf::st_transform(crs)
+i<- 0
 
-track<- sf::st_read("example_track.gpkg")
+# i<- i + 1
+deployid<- sample(unique(tracks$deployid), 1)
+print(deployid)
+# track<- subset(tracks, deployid == unique(deployid)[[i]])
+track<- tracks[tracks$deployid == deployid, ]
+track$class<- factor(
+    track$class,
+    levels = c("G", "3", "2", "1", "0", "A", "B", "Z"),
+    ordered = TRUE
+)
+small_classes<- names(which(table(track$class) <= 5))
+track<- subset(
+    track,
+    !(class %in% small_classes) &
+    !is.na(date)
+)
+print(track)
 fit<- trackfiltering::fit_track(
     track,
     interpolation_time = seq(
@@ -14,19 +32,19 @@ fit<- trackfiltering::fit_track(
     nodes = seq(
         min(track$date),
         max(track$date),
-        by = "1 days"
+        by = "3 days"
     ),
     robust_schedule = 0.05,
-    robust_function = "ssh",
-    independent_coordinates = TRUE,
-    robust_bandwidth = 2,
+    robust_function = "ll",
+    independent_coordinates = FALSE,
+    common_coordinate_correlation = TRUE,
+    robust_bandwidth = 3,
     fix_range = 8,
     correlation_function = function(x1, x2, p) {
         d<- sqrt(sum((x1 - x2)^2))
         range<- p[[1]]
         poly<- 1 + sqrt(5) * (d / range) + (5 / 3) * (d / range)^2
-        # return(poly * exp( -sqrt(5) * (d / range)))
-        return(exp(-(d/range)^2))
+        return(poly * exp( -sqrt(5) * (d / range)))
     }
 )
 
@@ -38,19 +56,6 @@ by(
     fit$pings$class,
     function(x) c(round(summary(x), 2), n = length(x))
 )
-# report<- obj$report()
-# report$Sigma_q
-# by(
-#     report$weights,
-#     environment(nll)$class,
-#     summary
-# )
-# plot.ts(
-#     cbind(
-#         report$ping_pred,
-#         environment(nll)$pings |> sf::st_coordinates()
-#     )[, c(1, 3, 2, 4)]
-# )
 
 est<- sf::st_coordinates(fit$interpolation$est)
 se<- sf::st_coordinates(fit$interpolation$se)

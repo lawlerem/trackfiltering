@@ -191,11 +191,44 @@ fit_track<- function(
     opt<- with(obj, nlminb(par, fn, gr))
     fitpar<- obj$env$parList()
     fitpar$robustness<- max(robust_schedule)
+    # Get good starting values for true path
     fitpar$node_values<- tighten(fitpar$node_values)
+
+    # Get good starting values for track parameters
+    opt_spline<- nlminb(
+        c(fitpar$working_variance),
+        function(x) {
+            splinex<- nnspline::update_spline_covariance(
+                spline,
+                exp(x[[1]]),
+                exp(fitpar$working_range[[1]])
+            )
+            spliney<- nnspline::update_spline_covariance(
+                spline,
+                exp(x[[2]]),
+                exp(fitpar$working_range[[2]])
+            )
+            ll<- 0
+            ll<- ll + nnspline::dspline(
+                fitpar$node_values[, 1],
+                splinex,
+                log = TRUE
+            )
+            ll<- ll + nnspline::dspline(
+                fitpar$node_values[, 2],
+                spliney,
+                log = TRUE
+            )
+            return( -ll )
+        }
+    )
+    fitpar$working_variance<- opt_spline$par
+
+    # Get good starting values for observation error
     obj<- RTMB::MakeADFun(
         nll,
         fitpar,
-        map = c(spline_map, map, robust_map),
+        map = c(list(working_variance = as.factor(c(NA, NA))), spline_map, map, robust_map),
         random = "node_values",
         silent = TRUE
     )
@@ -213,10 +246,13 @@ fit_track<- function(
 
     fitpar$working_ping_diagonal<- sapply(
         class_sd,
-        function(x) return(log(sqrt(c(x[1, 1], x[2, 2]))))
+        function(x) {
+            if( is.null(x) ) return(c(0, 0)) else return(log(sqrt(c(x[1, 1], x[2, 2]))))
+        }
     )
     fitpar$ping_off_diagonal[]<- 0
 
+    # Do a final optimization
     obj<- RTMB::MakeADFun(
         nll,
         fitpar,
@@ -226,15 +262,16 @@ fit_track<- function(
     )
     opt<- with(obj, nlminb(par, fn, gr))
     fitpar<- obj$env$parList()
+    sdr = RTMB::sdreport(
+        obj,
+        opt$par,
+        getJointPrecision = TRUE
+    )
     fit<- list(
         par = fitpar,
         obj = obj,
         opt = opt,
-        sdr = RTMB::sdreport(
-            obj,
-            opt$par,
-            getJointPrecision = TRUE
-        )
+        sdr = sdr
     )
     ###
 
@@ -283,6 +320,17 @@ fit_track<- function(
         se = interpolate_se
     )
     sf::st_crs(interpolation)<- sf::st_crs(pings)
+    names(report$Sigma_q)<- levels(class)
+    report$Sigma_q<- lapply(
+        names(report$Sigma_q),
+        function(class) {
+            if( missing_classes[[class]] ) {
+                return(NULL)
+            } else {
+                return(report$Sigma_q[[class]])
+            }
+        }
+    )
     names(report$Sigma_q)<- levels(class)
 
     return(

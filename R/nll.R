@@ -109,7 +109,7 @@ nll<- function(pars) {
         }
     )
     RTMB::REPORT(Sigma_q)
-    logdets<- lapply(Sigma_q, logdet)
+    # logdets<- lapply(Sigma_q, logdet)
 
     weights<- numeric(nrow(coordinates))
     coordinates<- RTMB::OBS(coordinates)
@@ -121,15 +121,25 @@ nll<- function(pars) {
             log = TRUE
         )
         ll<- ll + robustifyRTMB::robustify(
-            this_ll + logdets[[class[i]]],
-            robustness,
-            robust_function
-        ) - logdets[[class[i]]]
-        weights[i]<- robustifyRTMB::robust_weight(
-            this_ll + logdets[[class[i]]],
+            this_ll,
             robustness,
             robust_function
         )
+        weights[i]<- robustifyRTMB::robust_weight(
+            this_ll,
+            robustness,
+            robust_function
+        )
+        # ll<- ll + robustifyRTMB::robustify(
+        #     this_ll + logdets[[class[i]]],
+        #     robustness,
+        #     robust_function
+        # ) - logdets[[class[i]]]
+        # weights[i]<- robustifyRTMB::robust_weight(
+        #     this_ll + logdets[[class[i]]],
+        #     robustness,
+        #     robust_function
+        # )
     }
     RTMB::REPORT(weights)
     return(-1.0 * ll)
@@ -210,7 +220,7 @@ acoustic_nll<- function(pars) {
     for( i in seq(nrow(coordinates)) ) {
         this_var<- (coordinates_se[i, ])^2
         Sigma<- RTMB::diag(this_var, nrow = 2, ncol = 2)
-        logdet<- determinant(Sigma)$modulus
+        # logdet<- determinant(Sigma)$modulus
         this_ll<- RTMB::dmvnorm(
             coordinates[i, ],
             ping_pred[i, ],
@@ -218,15 +228,25 @@ acoustic_nll<- function(pars) {
             log = TRUE
         )
         ll<- ll + robustifyRTMB::robustify(
-            this_ll + logdet,
-            robustness,
-            robust_function
-        ) - logdet
-        weights[i]<- robustifyRTMB::robust_weight(
-            this_ll + logdet,
+            this_ll,
             robustness,
             robust_function
         )
+        weights[i]<- robustifyRTMB::robust_weight(
+            this_ll,
+            robustness,
+            robust_function
+        )
+        # ll<- ll + robustifyRTMB::robustify(
+        #     this_ll + logdet,
+        #     robustness,
+        #     robust_function
+        # ) - logdet
+        # weights[i]<- robustifyRTMB::robust_weight(
+        #     this_ll + logdet,
+        #     robustness,
+        #     robust_function
+        # )
     }
     RTMB::REPORT(weights)
     return(-1.0 * ll)
