@@ -1,15 +1,16 @@
 library(sf)
 library(trackfiltering)
-crs<- readRDS("track_crs.rds")
-tracks<- sf::st_read("tracks.gpkg") |>
-    sf::st_transform(crs)
-i<- 0
+# crs<- readRDS("track_crs.rds")
+# tracks<- sf::st_read("tracks.gpkg") |>
+#     sf::st_transform(crs)
+# i<- 0
 
-# i<- i + 1
-deployid<- sample(unique(tracks$deployid), 1)
-print(deployid)
-# track<- subset(tracks, deployid == unique(deployid)[[i]])
-track<- tracks[tracks$deployid == deployid, ]
+# # i<- i + 1
+# deployid<- sample(unique(tracks$deployid), 1)
+# print(deployid)
+# # track<- subset(tracks, deployid == unique(deployid)[[i]])
+# track<- tracks[tracks$deployid == deployid, ]
+track<- sf::st_read("example_track.gpkg")
 track$class<- factor(
     track$class,
     levels = c("G", "3", "2", "1", "0", "A", "B", "Z"),

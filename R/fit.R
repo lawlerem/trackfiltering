@@ -146,30 +146,14 @@ fit_track<- function(
         function(d, bandwidth) exp( -d / bandwidth ),
         "d"
     )
-    d<- dist(
-        spline$nodes,
-        diag = TRUE,
-        upper = TRUE
-    )
-    d<- as.matrix(d)
     bandwidth<- as.difftime(robust_bandwidth, units = time_units) |> as.numeric()
-    within<- d <= (2 * bandwidth)
-    weights<- 0 * d
-    weights[within]<- weight_fun(d[within], bandwidth)
-    weights<- sweep(
-        weights,
-        MARGIN = 1,
-        STATS = rowSums(weights),
-        FUN = "/"
-    )
-    tighten<- function(node_values) weights %*% cbind(node_values)
-    pars<- c(
+    fitpar<- c(
         pars,
         list(
-            robustness = 0
+            robustness = max(robust_schedule)
         )
     )
-    pars<- as.relistable(pars)
+    fitpar<- as.relistable(fitpar)
     robust_map<- list(
         robustness = as.factor(NA)
     )
@@ -181,18 +165,31 @@ fit_track<- function(
             )
         )
     )
-    obj<- RTMB::MakeADFun(
-        nll,
-        pars,
-        map = c(map, robust_map),
-        random = "node_values",
-        silent = TRUE
-    )
-    opt<- with(obj, nlminb(par, fn, gr))
-    fitpar<- obj$env$parList()
-    fitpar$robustness<- max(robust_schedule)
+
     # Get good starting values for true path
-    fitpar$node_values<- tighten(fitpar$node_values)
+    d<- dist(
+        c(
+            spline$nodes,
+            environment(nll)$time
+        ),
+        diag = TRUE,
+        upper = TRUE
+    )
+    d<- as.matrix(d)
+    within<- d <= 5 * bandwidth
+    weights<- 0 * d
+    weights[within]<- weight_fun(d[within], bandwidth)
+    ping_weights<- weights[seq(nrow(spline$nodes)), seq_along(environment(nll)$time) + nrow(spline$nodes)]
+    zero_rows<- rowSums(ping_weights) == 0
+    ping_weights[!zero_rows, ]<- sweep(
+        ping_weights[!zero_rows, ],
+        MARGIN = 1,
+        STATS = rowSums(ping_weights[!zero_rows, ]),
+        FUN = "/"
+    )
+    fitpar$node_values[!zero_rows, ]<- ping_weights[!zero_rows, ] %*% environment(nll)$coordinates
+
+    # node_weights<- weights[seq(nrow(spline$nodes)), seq(nrow(spline$nodes))]
 
     # Get good starting values for track parameters
     opt_spline<- nlminb(
