@@ -2,7 +2,7 @@ theta2cor<- function(theta) {
     n<- floor(sqrt(2 * length(theta))) + 1
     m<- RTMB::matrix(0, nrow = n, ncol = n)
     m[lower.tri(m)]<- theta
-    h<- (exp(m) - 1) / (exp(m) + 1) / 2
+    h<- (exp(m) - 1) / (exp(m) + 1)
     
     scalings<- sqrt(1 - h^2)
     scalings[upper.tri(scalings, diag = TRUE)]<- 0
@@ -16,18 +16,6 @@ theta2cor<- function(theta) {
     cor<- L %*% t(L)
     return(cor)
 }
-
-logdet<- RTMB::ADjoint(
-    function(x) {
-        dim(x) <- rep(sqrt(length(x)), 2)
-        determinant(x, log=TRUE)$modulus
-    },
-    function(x, y, dy) {
-        dim(x) <- rep(sqrt(length(x)), 2)
-        t(RTMB::solve(x)) * dy
-    },
-    name = "logdet"
-)
 
 nll<- function(pars) {
     "[<-"<- RTMB::ADoverload("[<-")
@@ -98,7 +86,7 @@ nll<- function(pars) {
 
     # Ping likelihood and robust weights
     ping_diagonal<- exp(working_ping_diagonal)
-    ping_diagonal[]<- ping_diagonal[] + 1e4 * .Machine$double.eps
+    ping_diagonal[]<- ping_diagonal[]
     Sigma_q<- lapply(
         seq(n_class),
         function(q) {
@@ -109,7 +97,6 @@ nll<- function(pars) {
         }
     )
     RTMB::REPORT(Sigma_q)
-    # logdets<- lapply(Sigma_q, logdet)
 
     weights<- numeric(nrow(coordinates))
     coordinates<- RTMB::OBS(coordinates)
@@ -130,16 +117,6 @@ nll<- function(pars) {
             robustness,
             robust_function
         )
-        # ll<- ll + robustifyRTMB::robustify(
-        #     this_ll + logdets[[class[i]]],
-        #     robustness,
-        #     robust_function
-        # ) - logdets[[class[i]]]
-        # weights[i]<- robustifyRTMB::robust_weight(
-        #     this_ll + logdets[[class[i]]],
-        #     robustness,
-        #     robust_function
-        # )
     }
     RTMB::REPORT(weights)
     return(-1.0 * ll)
@@ -220,7 +197,6 @@ acoustic_nll<- function(pars) {
     for( i in seq(nrow(coordinates)) ) {
         this_var<- (coordinates_se[i, ])^2
         Sigma<- RTMB::diag(this_var, nrow = 2, ncol = 2)
-        # logdet<- determinant(Sigma)$modulus
         this_ll<- RTMB::dmvnorm(
             coordinates[i, ],
             ping_pred[i, ],
@@ -237,16 +213,6 @@ acoustic_nll<- function(pars) {
             robustness,
             robust_function
         )
-        # ll<- ll + robustifyRTMB::robustify(
-        #     this_ll + logdet,
-        #     robustness,
-        #     robust_function
-        # ) - logdet
-        # weights[i]<- robustifyRTMB::robust_weight(
-        #     this_ll + logdet,
-        #     robustness,
-        #     robust_function
-        # )
     }
     RTMB::REPORT(weights)
     return(-1.0 * ll)

@@ -1,5 +1,6 @@
 library(sf)
-library(trackfiltering)
+# library(trackfiltering)
+devtools::load_all()
 # crs<- readRDS("track_crs.rds")
 # tracks<- sf::st_read("tracks.gpkg") |>
 #     sf::st_transform(crs)
@@ -33,20 +34,20 @@ fit<- trackfiltering::fit_track(
     nodes = seq(
         min(track$date),
         max(track$date),
-        by = "3 days"
+        by = "1 days"
     ),
+    # fix_range = 15,
     robust_schedule = 0.05,
     robust_function = "ll",
-    independent_coordinates = FALSE,
-    common_coordinate_correlation = TRUE,
-    robust_bandwidth = 3,
-    fix_range = 8,
-    correlation_function = function(x1, x2, p) {
-        d<- sqrt(sum((x1 - x2)^2))
-        range<- p[[1]]
-        poly<- 1 + sqrt(5) * (d / range) + (5 / 3) * (d / range)^2
-        return(poly * exp( -sqrt(5) * (d / range)))
-    }
+    # independent_coordinates = FALSE,
+    # common_coordinate_correlation = FALSE,
+    robust_bandwidth = 3
+    # correlation_function = function(x1, x2, p) {
+    #     d<- sqrt(sum((x1 - x2)^2))
+    #     range<- p[[1]]
+    #     poly<- 1 + sqrt(5) * (d / range) + (5 / 3) * (d / range)^2
+    #     return(poly * exp( -sqrt(5) * (d / range)))
+    # }
 )
 
 fit$opt

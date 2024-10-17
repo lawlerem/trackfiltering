@@ -29,7 +29,6 @@ fit_track<- function(
         correlation_function = function(x1, x2, p) {
             d<- sqrt(sum((x1 - x2)^2))
             range<- p[[1]]
-            # (0.05 * (d == 0) + 0.95 ) * exp( -(d / range)^2 )
             exp( -(d / range)^2 )
         }
     ) {
@@ -130,23 +129,8 @@ fit_track<- function(
     map<- lapply(map, as.factor)
 
     environment(nll)<- environment()
-    # fit<- robustifyRTMB::robustly_optimize(
-    #     nll,
-    #     pars,
-    #     random = "node_values",
-    #     map = map,
-    #     smooth = "node_values",
-    #     nodes = spline$nodes,
-    #     robust_schedule = robust_schedule,
-    #     bandwidth = as.difftime(robust_bandwidth, units = time_units) |> as.numeric()
-    # )
 
     ### Bespoke robust optimization
-    weight_fun<- Vectorize(
-        function(d, bandwidth) exp( -d / bandwidth ),
-        "d"
-    )
-    bandwidth<- as.difftime(robust_bandwidth, units = time_units) |> as.numeric()
     fitpar<- c(
         pars,
         list(
@@ -167,6 +151,11 @@ fit_track<- function(
     )
 
     # Get good starting values for true path
+    weight_fun<- Vectorize(
+        function(d, bandwidth) exp( -d / bandwidth ),
+        "d"
+    )
+    bandwidth<- as.difftime(robust_bandwidth, units = time_units) |> as.numeric()
     d<- dist(
         c(
             spline$nodes,
@@ -176,64 +165,78 @@ fit_track<- function(
         upper = TRUE
     )
     d<- as.matrix(d)
-    within<- d <= 5 * bandwidth
-    weights<- 0 * d
-    weights[within]<- weight_fun(d[within], bandwidth)
+    weights<- d
+    weights[]<- weight_fun(d, bandwidth)
     ping_weights<- weights[seq(nrow(spline$nodes)), seq_along(environment(nll)$time) + nrow(spline$nodes)]
-    zero_rows<- rowSums(ping_weights) == 0
-    ping_weights[!zero_rows, ]<- sweep(
-        ping_weights[!zero_rows, ],
+    ping_weights<- sweep(
+        ping_weights,
         MARGIN = 1,
-        STATS = rowSums(ping_weights[!zero_rows, ]),
+        STATS = rowSums(ping_weights),
         FUN = "/"
     )
-    fitpar$node_values[!zero_rows, ]<- ping_weights[!zero_rows, ] %*% environment(nll)$coordinates
-
-    # node_weights<- weights[seq(nrow(spline$nodes)), seq(nrow(spline$nodes))]
+    fitpar$node_values<- ping_weights %*% environment(nll)$coordinates
 
     # Get good starting values for track parameters
-    opt_spline<- nlminb(
-        c(fitpar$working_variance),
-        function(x) {
-            splinex<- nnspline::update_spline_covariance(
-                spline,
-                exp(x[[1]]),
-                exp(fitpar$working_range[[1]])
-            )
-            spliney<- nnspline::update_spline_covariance(
-                spline,
-                exp(x[[2]]),
-                exp(fitpar$working_range[[2]])
-            )
-            ll<- 0
-            ll<- ll + nnspline::dspline(
-                fitpar$node_values[, 1],
-                splinex,
-                log = TRUE
-            )
-            ll<- ll + nnspline::dspline(
-                fitpar$node_values[, 2],
-                spliney,
-                log = TRUE
-            )
-            return( -ll )
-        }
-    )
-    fitpar$working_variance<- opt_spline$par
-
-    # Get good starting values for observation error
+    ff<- function(pars) {
+        RTMB::getAll(pars)
+        splinex<- nnspline::update_spline_covariance(
+            spline,
+            exp(working_variance[[1]]),
+            exp(working_range[[1]]),
+            only_node_covariance = TRUE
+        )
+        spliney<- nnspline::update_spline_covariance(
+            spline,
+            exp(working_variance[[2]]),
+            exp(working_range[[2]]),
+            only_node_covariance = TRUE
+        )
+        ll<- 0
+        ll<- ll + nnspline::dspline(
+            fitpar$node_values[, 1] - fitpar$center[[1]],
+            splinex,
+            log = TRUE
+        )
+        ll<- ll + nnspline::dspline(
+            fitpar$node_values[, 2] - fitpar$center[[2]],
+            spliney,
+            log = TRUE
+        )
+        return( -ll )
+    }
+    parnames<- c("working_variance", "working_range")
     obj<- RTMB::MakeADFun(
-        nll,
-        fitpar,
-        map = c(list(working_variance = as.factor(c(NA, NA))), spline_map, map, robust_map),
-        random = "node_values",
+        ff,
+        fitpar[parnames],
+        map = map[names(map) %in% parnames],
         silent = TRUE
     )
-    opt<- with(obj, nlminb(par, fn, gr))
-    fitpar<- obj$env$parList()
-    report<- obj$report()
-    residuals<- report$ping_pred - environment(nll)$coordinates
-    class_sd<- by(
+    opt_spline<- nlminb(
+        obj$par,
+        obj$fn,
+        obj$gr
+    )
+    fitpar[parnames]<- obj$env$parList()
+
+    # Get good starting values for observation error
+    x_spline<- nnspline::update_spline(
+        spline,
+        variance = exp(fitpar$working_variance[[1]]),
+        parameters = exp(fitpar$working_range[[1]]),
+        node_values = fitpar$node_values[, 1]
+    )
+    y_spline<- nnspline::update_spline(
+        spline,
+        variance = exp(fitpar$working_variance[[2]]),
+        parameters = exp(fitpar$working_range[[2]]),
+        node_values = fitpar$node_values[, 2]
+    )
+    ping_pred<- cbind(
+        fitpar$center[[1]] + nnspline::nns(time, x_spline),
+        fitpar$center[[2]] + nnspline::nns(time, y_spline)
+    )
+    residuals<- ping_pred - environment(nll)$coordinates
+    class_cov<- by(
         residuals,
         environment(nll)$class,
         function(x) {
@@ -242,7 +245,7 @@ fit_track<- function(
     )
 
     fitpar$working_ping_diagonal<- sapply(
-        class_sd,
+        class_cov,
         function(x) {
             if( is.null(x) ) return(c(0, 0)) else return(log(sqrt(c(x[1, 1], x[2, 2]))))
         }
@@ -254,7 +257,7 @@ fit_track<- function(
         nll,
         fitpar,
         map = c(map, robust_map),
-        random = "node_values",
+        random = c("node_values"),
         silent = TRUE
     )
     opt<- with(obj, nlminb(par, fn, gr))
@@ -336,6 +339,7 @@ fit_track<- function(
             interpolation = interpolation,
             error_matrices = report$Sigma_q,
             obj = fit$obj,
+            par = fit$par,
             opt = fit$opt,
             sdr = fit$sdr,
             sdr_est = sdr_est,
