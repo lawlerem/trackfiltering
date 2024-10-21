@@ -29,10 +29,10 @@ nll<- function(pars) {
     ll<- 0
 
     # Track likelihood and predictions
+    xpars<- c(variance[[1]], range[[1]])
     x_spline<- nnspline::update_spline_covariance(
         spline,
-        variance = variance[1],
-        parameters = range[1]
+        parameters = xpars
     )
     ll<- ll + nnspline::dspline(
         node_values[, 1],
@@ -44,10 +44,10 @@ nll<- function(pars) {
         node_values[, 1]
     )
 
+    ypars<- c(variance[[2]], range[[2]])
     y_spline<- nnspline::update_spline_covariance(
         spline,
-        variance = variance[2],
-        parameters = range[2]
+        parameters = ypars
     )
     ll<- ll + nnspline::dspline(
         node_values[, 2],
@@ -60,10 +60,10 @@ nll<- function(pars) {
     )
     
     interpolated_coordinates<- cbind(
-        center[1] + nnspline::nns(
+        c(center[1]) + c(nnspline::nns(
             interpolation_time,
             x_spline
-        ),
+        )),
         center[2] + nnspline::nns(
             interpolation_time,
             y_spline
@@ -110,12 +110,12 @@ nll<- function(pars) {
         ll<- ll + robustifyRTMB::robustify(
             this_ll,
             robustness,
-            robust_function
+            "ll"
         )
         weights[i]<- robustifyRTMB::robust_weight(
             this_ll,
             robustness,
-            robust_function
+            "ll"
         )
     }
     RTMB::REPORT(weights)
@@ -136,10 +136,10 @@ acoustic_nll<- function(pars) {
     ll<- 0
 
     # Track likelihood and predictions
+    xpars<- c(variance[[1]], range[[1]])
     x_spline<- nnspline::update_spline_covariance(
         spline,
-        variance = variance[1],
-        parameters = range[1]
+        parameters = xpars
     )
     ll<- ll + nnspline::dspline(
         node_values[, 1],
@@ -151,10 +151,10 @@ acoustic_nll<- function(pars) {
         node_values[, 1]
     )
 
+    ypars<- c(variance[[2]], range[[2]])
     y_spline<- nnspline::update_spline_covariance(
         spline,
-        variance = variance[2],
-        parameters = range[2]
+        parameters = ypars
     )
     ll<- ll + nnspline::dspline(
         node_values[, 2],
@@ -167,10 +167,10 @@ acoustic_nll<- function(pars) {
     )
     
     interpolated_coordinates<- cbind(
-        center[1] + nnspline::nns(
+        c(center[1]) + c(nnspline::nns(
             interpolation_time,
             x_spline
-        ),
+        )),
         center[2] + nnspline::nns(
             interpolation_time,
             y_spline
@@ -206,12 +206,12 @@ acoustic_nll<- function(pars) {
         ll<- ll + robustifyRTMB::robustify(
             this_ll,
             robustness,
-            robust_function
+            "ll"
         )
         weights[i]<- robustifyRTMB::robust_weight(
             this_ll,
             robustness,
-            robust_function
+            "ll"
         )
     }
     RTMB::REPORT(weights)

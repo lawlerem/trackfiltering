@@ -2,3 +2,8 @@
 
 export(fit_acoustic_track)
 export(fit_track)
+importFrom(robust,covRob)
+importFrom(stats,dist)
+importFrom(stats,median)
+importFrom(stats,nlminb)
+importFrom(utils,as.relistable)

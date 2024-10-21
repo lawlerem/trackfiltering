@@ -8,13 +8,21 @@ fit_track(
   pings,
   interpolation_time = numeric(0),
   nodes = unique(pings$date),
-  robust_schedule = seq(0, 0.05, by = 0.01),
-  robust_function = "ll",
+  robustness = 0.1,
   robust_bandwidth = 1,
   independent_coordinates = FALSE,
   common_coordinate_correlation = TRUE,
   time_units = "days",
-  fix_range
+  fix_range,
+  covariance_function = function(x1, x2, p) {
+     d <- sqrt(sum((x1 - x2)^2))
+    
+    variance <- p[[1]]
+     range <- p[[2]]
+     poly <- 1 + sqrt(5) * (d/range) + (5/3)
+    * (d/range)^2
+     return(variance * poly * exp(-sqrt(5) * (d/range)))
+ }
 )
 }
 \arguments{
@@ -24,9 +32,7 @@ fit_track(
 
 \item{nodes}{A vector of times used as nodes in the underlying spline.}
 
-\item{robust_schedule}{See robustifyRTMB::robustly_optimize}
-
-\item{robust_function}{See robustifyRTMB::robustify}
+\item{robustness}{A numeric tuning parameter. 0 corresponds to maximum likelihood, and increasing values correspond to more aggressive outlier detection.}
 
 \item{robust_bandwidth}{See robustifyRTMB::robustly_optimize. Should be specified as a numeric values measured in units given by the time_units arguments.}
 
@@ -39,6 +45,22 @@ quality classes are assumed to have the same correlation structure.}
 \item{time_units}{Which time units should be used? Mostly matters for numerical stability.}
 
 \item{fix_range}{If set to a value, the range parameter will be fixed to the given value.}
+
+\item{covariance_function}{See nnspline::create_nnspline}
+}
+\value{
+A list with the following:
+\itemize{
+\item pings A copy of the provided location pings with an additional weights column giving the robust weight of each observation, an "est" geometry column giving the estimated location, and an "se" geometry column giving the standard errors around the estimate.
+\item interpolation An sf data.frame with a column giving the timestamp for the interpolation time, an "est" geometry column giving the estimated location, and an "se" geometry column giving the standard errors around the estimate.
+\item error_matrices A list of estimated observation error covariance matrices for each quality class.
+\item obj The RTMB::MakeADFun object used for the negative log-likelihood computation.
+\item par The estimated parameter list.
+\item opt The optimizer output.
+\item sdr See RTMB::sdreport
+\item sdr_est A list giving the estimates of model parameters and derived quantities
+\item sdr_se A list giving the standard errors of model parameters and derived quantities
+}
 }
 \description{
 Fit a model to a movement track
