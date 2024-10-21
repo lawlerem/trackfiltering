@@ -17,3 +17,6 @@ Imports:
     sf,
     stats,
     utils
+Remotes:
+    lawlerem/nnspline,
+    lawlerem/robustifyRTMB
