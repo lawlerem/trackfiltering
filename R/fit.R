@@ -12,6 +12,7 @@
 #' @param time_units Which time units should be used? Mostly matters for numerical stability.
 #' @param fix_range If set to a value, the range parameter will be fixed to the given value.
 #' @param covariance_function See nnspline::create_nnspline
+#' @param silent Should optimization tracing be suppressed?
 #' 
 #' @return A list with the following:
 #'   - pings A copy of the provided location pings with an additional weights column giving the robust weight of each observation, an "est" geometry column giving the estimated location, and an "se" geometry column giving the standard errors around the estimate.
@@ -42,7 +43,8 @@ fit_track<- function(
             poly<- 1 + sqrt(5) * (d / range) + (5 / 3) * (d / range)^2
             return(variance * poly * exp( - sqrt(5) * (d / range)))
         },
-        n_parents = 5
+        n_parents = 5,
+        silent = TRUE
     ) {
     coordinates<- sf::st_coordinates(pings)
     time<- pings$date
@@ -259,11 +261,12 @@ fit_track<- function(
         return( -ll )
     }
     parnames<- c("working_variance", "working_range")
+    if( !silent ) cat("Estimating initial spline parameters.\n")
     obj<- RTMB::MakeADFun(
         ff,
         fitpar[parnames],
         map = map[names(map) %in% parnames],
-        silent = TRUE
+        silent = silent
     )
     opt_spline<- stats::nlminb(
         obj$par,
@@ -317,6 +320,7 @@ fit_track<- function(
     fitpar$ping_off_diagonal[]<- 0
 
     # Do a final optimization
+    if( !silent ) cat("\n Running final optimization.\n")
     obj<- RTMB::MakeADFun(
         nll,
         fitpar,
@@ -325,10 +329,12 @@ fit_track<- function(
             robust_map
         ),
         random = c("node_values"),
-        silent = TRUE
+        silent = silent
     )
     opt<- with(obj, stats::nlminb(par, fn, gr))
     fitpar<- obj$env$parList()
+    
+    if( !silent ) cat("\n Computing standard errors.\n")
     sdr = RTMB::sdreport(
         obj,
         opt$par,
