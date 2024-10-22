@@ -41,7 +41,8 @@ fit_track<- function(
             range<- p[[2]]
             poly<- 1 + sqrt(5) * (d / range) + (5 / 3) * (d / range)^2
             return(variance * poly * exp( - sqrt(5) * (d / range)))
-        }
+        },
+        n_parents = 5
     ) {
     coordinates<- sf::st_coordinates(pings)
     time<- pings$date
@@ -78,7 +79,7 @@ fit_track<- function(
     spline<- nnspline::create_nnspline(
         x = c(time, interpolation_time),
         nodes = nodes,
-        n_parents = 6,
+        n_parents = n_parents,
         parameters = c(1, 1),
         covariance_function = covariance_function
     )
@@ -187,7 +188,47 @@ fit_track<- function(
         STATS = rowSums(ping_weights),
         FUN = "/"
     )
-    fitpar$node_values<- ping_weights %*% environment(nll)$coordinates
+
+    x_ping_ranks<- order(sf::st_coordinates(pings)[, 1])
+    x_ping_weights<- ping_weights[, x_ping_ranks]
+    y_ping_ranks<- order(sf::st_coordinates(pings)[, 2])
+    y_ping_weights<- ping_weights[, y_ping_ranks]
+    sorted_x_coord<- sf::st_coordinates(pings)[x_ping_ranks, 1]
+    sorted_y_coord<- sf::st_coordinates(pings)[y_ping_ranks, 2]
+    fitpar$node_values<- t(sapply(
+        seq(nrow(fitpar$node_values)),
+        function(i) {
+            # 1.) Find the weight where sum w_->i >= 0.5
+            # 2.) Linearly interpolate coordinate x_i and x_i+1
+            x_cumweights<- cumsum(x_ping_weights[i, ])
+            x_idx<- c(
+                tail(which(x_cumweights < 0.5), 1),
+                head(which(x_cumweights >= 0.5), 1)
+            )
+            if( length(x_idx) == 1 ) {
+                x_val<- sorted_x_coord[x_idx]
+            } else {
+                w<- (x_cumweights[x_idx[2]] - 0.5) / (x_cumweights[x_idx[2]] - x_cumweights[x_idx[1]])
+                x_val<- w * sorted_x_coord[x_idx[1]] + (1 - w) * sorted_x_coord[x_idx[2]]
+            }
+
+            y_cumweights<- cumsum(y_ping_weights[i, ])
+            y_idx<- c(
+                tail(which(y_cumweights < 0.5), 1),
+                head(which(y_cumweights >= 0.5), 1)
+            )
+            if( length(y_idx) == 1 ) {
+                y_val<- sorted_y_coord[y_idx]
+            } else {
+                w<- (y_cumweights[y_idx[2]] - 0.5) / (y_cumweights[y_idx[2]] - y_cumweights[y_idx[1]])
+                y_val<- w * sorted_y_coord[y_idx[1]] + (1 - w) * sorted_y_coord[y_idx[2]]
+            }
+
+            return(c(x_val, y_val))
+        }
+    ))
+
+    # fitpar$node_values<- ping_weights %*% environment(nll)$coordinates
     fitpar$center<- colMeans(fitpar$node_values)
     fitpar$node_values<- sweep(fitpar$node_values, MARGIN = 2, fitpar$center)
 
