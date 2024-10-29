@@ -86,7 +86,11 @@ nll<- function(pars) {
 
     # Ping likelihood and robust weights
     ping_diagonal<- exp(working_ping_diagonal)
-    ping_diagonal[]<- ping_diagonal[]
+    if( ordered_classes ) {
+        for( i in seq(nrow(ping_diagonal)) ) {
+            ping_diagonal[i, ]<- cumsum(ping_diagonal[i, ])
+        }
+    }
     Sigma_q<- lapply(
         seq(n_class),
         function(q) {

@@ -8,7 +8,7 @@ fit_track(
   pings,
   interpolation_time = numeric(0),
   nodes = unique(pings$date),
-  robustness = 0.1,
+  robustness = 0.05,
   robust_bandwidth = 1,
   independent_coordinates = FALSE,
   common_coordinate_correlation = TRUE,
@@ -19,14 +19,16 @@ fit_track(
     
     variance <- p[[1]]
      range <- p[[2]]
-     poly <- 1 + sqrt(5) * (d/range) + (5/3)
-    * (d/range)^2
-     return(variance * poly * exp(-sqrt(5) * (d/range)))
- }
+     poly <- 1 + sqrt(3) * (d/range)
+    
+    return(variance * range^3 * poly * exp(-sqrt(3) * (d/range)))
+ },
+  n_parents = 5,
+  silent = TRUE
 )
 }
 \arguments{
-\item{pings}{An sf data frame with a POSIX or numeric column named "date", an optional factor column named "class", and point geometries.}
+\item{pings}{An sf data frame with a POSIX or numeric column named "date", a factor column named "class", and point geometries. If class is an ordered factor, then the estimated observation error variances will increase with class.}
 
 \item{interpolation_time}{A vector of times at which to interpolate locations.}
 
@@ -46,7 +48,9 @@ quality classes are assumed to have the same correlation structure.}
 
 \item{fix_range}{If set to a value, the range parameter will be fixed to the given value.}
 
-\item{covariance_function}{See nnspline::create_nnspline}
+\item{covariance_function}{See nnspline::create_nnspline. The parameters should be a vector of length two where the first element of the variance and the second element is the range.}
+
+\item{silent}{Should optimization tracing be suppressed?}
 }
 \value{
 A list with the following:

@@ -1,6 +1,6 @@
 #' Fit a model to a movement track
 #' 
-#' @param pings An sf data frame with a POSIX or numeric column named "date", an optional factor column named "class", and point geometries.
+#' @param pings An sf data frame with a POSIX or numeric column named "date", a factor column named "class", and point geometries. If class is an ordered factor, then the estimated observation error variances will increase with class.
 #' @param interpolation_time A vector of times at which to interpolate locations.
 #' @param nodes A vector of times used as nodes in the underlying spline.
 #' @param robustness A numeric tuning parameter. 0 corresponds to maximum likelihood, and increasing values correspond to more aggressive outlier detection.
@@ -11,7 +11,7 @@
 #'   quality classes are assumed to have the same correlation structure.
 #' @param time_units Which time units should be used? Mostly matters for numerical stability.
 #' @param fix_range If set to a value, the range parameter will be fixed to the given value.
-#' @param covariance_function See nnspline::create_nnspline
+#' @param covariance_function See nnspline::create_nnspline. The parameters should be a vector of length two where the first element of the variance and the second element is the range.
 #' @param silent Should optimization tracing be suppressed?
 #' 
 #' @return A list with the following:
@@ -30,7 +30,7 @@ fit_track<- function(
         pings,
         interpolation_time = numeric(0),
         nodes = unique(pings$date),
-        robustness = 0.1,
+        robustness = 0.05,
         robust_bandwidth = 1,
         independent_coordinates = FALSE,
         common_coordinate_correlation = TRUE,
@@ -40,8 +40,8 @@ fit_track<- function(
             d<- sqrt(sum((x1 - x2)^2))
             variance<- p[[1]]
             range<- p[[2]]
-            poly<- 1 + sqrt(5) * (d / range) + (5 / 3) * (d / range)^2
-            return(variance * poly * exp( - sqrt(5) * (d / range)))
+            poly<- 1 + sqrt(3) * (d / range)
+            return(variance * range^3 * poly * exp( - sqrt(3) * (d / range)))
         },
         n_parents = 5,
         silent = TRUE
@@ -56,10 +56,8 @@ fit_track<- function(
     if( !is.factor(class) ) {
         class<- as.factor(class)
     } else {}
-    if( any(table(class) <= 10) ) {
-        warning("One or more of the quality classes has 10 or fewer observations, which may cause estimation issues.")
-    }
-
+    ordered_classes<- is.ordered(class)
+    
     min_time<- min(time)
     original_interpolation_time<- interpolation_time
     time<- difftime(
@@ -121,6 +119,7 @@ fit_track<- function(
 
     map<- list(
         working_range = map_range,
+        center = as.factor(c(NA, NA)),
         working_ping_diagonal = matrix(
             seq_along(pars$working_ping_diagonal),
             nrow = nrow(pars$working_ping_diagonal)
@@ -130,17 +129,22 @@ fit_track<- function(
             nrow = nrow(pars$ping_off_diagonal)
         )
     )
+
+    if( any(table(class) > 0 & table(class) <= 10) ) {
+        warning("One or more of the quality classes has 10 or fewer observations, which may cause estimation issues.")
+    }
     missing_classes<- table(class) == 0
-    pars$working_ping_diagonal[, missing_classes]<- NA
+    pars$working_ping_diagonal[, missing_classes]<- -10
     map$working_ping_diagonal[, missing_classes]<- NA
     map$ping_off_diagonal[, missing_classes]<- NA
+    
     if( common_coordinate_correlation ) {
         map$ping_off_diagonal[]<- seq(nrow(map$ping_off_diagonal))
-    } else {}
+    }
     if( independent_coordinates ) {
         pars$ping_off_diagonal[]<- 0
         map$ping_off_diagonal[]<- NA
-    } else {}
+    }
     map<- lapply(map, as.factor)
 
     environment(nll)<- environment()
@@ -183,6 +187,13 @@ fit_track<- function(
     d<- as.matrix(d)
     weights<- d
     weights[]<- weight_fun(d, bandwidth)
+    node_weights<- weights[seq(nrow(spline$nodes)), seq(nrow(spline$nodes))]
+    node_weights<- sweep(
+        node_weights,
+        MARGIN = 1,
+        STATS = rowSums(node_weights),
+        FUN = "/"
+    )
     ping_weights<- weights[seq(nrow(spline$nodes)), seq_along(environment(nll)$time) + nrow(spline$nodes)]
     ping_weights<- sweep(
         ping_weights,
@@ -204,8 +215,8 @@ fit_track<- function(
             # 2.) Linearly interpolate coordinate x_i and x_i+1
             x_cumweights<- cumsum(x_ping_weights[i, ])
             x_idx<- c(
-                tail(which(x_cumweights < 0.5), 1),
-                head(which(x_cumweights >= 0.5), 1)
+                rev(which(x_cumweights < 0.5))[1],
+                which(x_cumweights >= 0.5)[1]
             )
             if( length(x_idx) == 1 ) {
                 x_val<- sorted_x_coord[x_idx]
@@ -216,8 +227,8 @@ fit_track<- function(
 
             y_cumweights<- cumsum(y_ping_weights[i, ])
             y_idx<- c(
-                tail(which(y_cumweights < 0.5), 1),
-                head(which(y_cumweights >= 0.5), 1)
+                rev(which(y_cumweights < 0.5))[1],
+                which(y_cumweights >= 0.5)[1]
             )
             if( length(y_idx) == 1 ) {
                 y_val<- sorted_y_coord[y_idx]
@@ -230,8 +241,7 @@ fit_track<- function(
         }
     ))
 
-    # fitpar$node_values<- ping_weights %*% environment(nll)$coordinates
-    fitpar$center<- colMeans(fitpar$node_values)
+    fitpar$node_values<- node_weights %*% fitpar$node_values
     fitpar$node_values<- sweep(fitpar$node_values, MARGIN = 2, fitpar$center)
 
     # Get good starting values for track parameters
@@ -276,6 +286,7 @@ fit_track<- function(
     fitpar[parnames]<- obj$env$parList()
 
     # Get good starting values for observation error
+    if( !silent ) cat("Estimating initial observation error parameters.\n")
     xpars<- exp(
         c(
             fitpar$working_variance[[1]],
@@ -302,22 +313,66 @@ fit_track<- function(
         fitpar$center[[1]] + nnspline::nns(time, x_spline),
         fitpar$center[[2]] + nnspline::nns(time, y_spline)
     )
-    residuals<- ping_pred - environment(nll)$coordinates
-    class_cov<- by(
-        residuals,
-        environment(nll)$class,
-        function(x) {
-            return(robust::covRob(x)$cov)
-        }
-    )
 
-    fitpar$working_ping_diagonal<- sapply(
-        class_cov,
-        function(x) {
-            if( is.null(x) ) return(c(0, 0)) else return(log(sqrt(c(x[1, 1], x[2, 2]))))
+    ff<- function(pars) {
+        RTMB::getAll(pars)
+        ping_diagonal<- exp(working_ping_diagonal)
+        if( ordered_classes ) {
+            for( i in seq(nrow(ping_diagonal)) ) {
+                ping_diagonal[i, ]<- cumsum(ping_diagonal[i, ])
+            }
         }
+        Sigma_q<- lapply(
+            seq(n_class),
+            function(q) {
+                cor<- theta2cor(ping_off_diagonal[, q])
+                Sigma<- RTMB::diag(ping_diagonal[, q])
+                Sigma<- Sigma %*% cor %*% Sigma
+                return(Sigma)
+            }
+        )
+
+        ll<- 0
+        weights<- numeric(nrow(coordinates))
+        coordinates<- RTMB::OBS(coordinates)
+        for( i in seq(nrow(coordinates)) ) {
+            this_ll<- RTMB::dmvnorm(
+                coordinates[i, ],
+                ping_pred[i, ],
+                Sigma_q[[class[i]]],
+                log = TRUE
+            )
+            ll<- ll + robustifyRTMB::robustify(
+                this_ll,
+                robustness,
+                "ll"
+            )
+            weights[i]<- robustifyRTMB::robust_weight(
+                this_ll,
+                robustness,
+                "ll"
+            )
+        }
+        return( -ll )
+    }
+    parnames<- c("working_ping_diagonal", "ping_off_diagonal")
+    obj<- RTMB::MakeADFun(
+        ff,
+        fitpar[parnames],
+        map = map[names(map) %in% parnames],
+        silent = silent
     )
-    fitpar$ping_off_diagonal[]<- 0
+    opt_obserr<- stats::nlminb(
+        obj$par,
+        obj$fn,
+        obj$gr
+    )
+    fitpar[parnames]<- obj$env$parList()
+    
+    if( ordered_classes ) {
+        map$working_ping_diagonal[fitpar$working_ping_diagonal < -3]<- NA
+        map$working_ping_diagonal<- droplevels.factor(map$working_ping_diagonal)
+    } else {}
 
     # Do a final optimization
     if( !silent ) cat("\n Running final optimization.\n")
