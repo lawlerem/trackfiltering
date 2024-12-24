@@ -6,37 +6,17 @@
 \usage{
 fit_track(
   pings,
-  interpolation_time = numeric(0),
   nodes = unique(pings$date),
-  robustness = 0.05,
-  robust_bandwidth = 1,
   independent_coordinates = FALSE,
   common_coordinate_correlation = TRUE,
   time_units = "days",
-  fix_range,
-  covariance_function = function(x1, x2, p) {
-     d <- sqrt(sum((x1 - x2)^2))
-    
-    variance <- p[[1]]
-     range <- p[[2]]
-     poly <- 1 + sqrt(3) * (d/range)
-    
-    return(variance * range^3 * poly * exp(-sqrt(3) * (d/range)))
- },
-  n_parents = 5,
-  silent = TRUE
+  ...
 )
 }
 \arguments{
 \item{pings}{An sf data frame with a POSIX or numeric column named "date", a factor column named "class", and point geometries. If class is an ordered factor, then the estimated observation error variances will increase with class.}
 
-\item{interpolation_time}{A vector of times at which to interpolate locations.}
-
 \item{nodes}{A vector of times used as nodes in the underlying spline.}
-
-\item{robustness}{A numeric tuning parameter. 0 corresponds to maximum likelihood, and increasing values correspond to more aggressive outlier detection.}
-
-\item{robust_bandwidth}{See robustifyRTMB::robustly_optimize. Should be specified as a numeric values measured in units given by the time_units arguments.}
 
 \item{independent_coordinates}{If true, then observation ellipses are assumed to have
 independent axes.}
@@ -46,11 +26,7 @@ quality classes are assumed to have the same correlation structure.}
 
 \item{time_units}{Which time units should be used? Mostly matters for numerical stability.}
 
-\item{fix_range}{If set to a value, the range parameter will be fixed to the given value.}
-
-\item{covariance_function}{See nnspline::create_nnspline. The parameters should be a vector of length two where the first element of the variance and the second element is the range.}
-
-\item{silent}{Should optimization tracing be suppressed?}
+\item{...}{Additional arguments, particularly those to pass to nnspline::create_nnspline, robustifyRTMB::robustly_optimize, and mcreportRTMB::mcreport.}
 }
 \value{
 A list with the following:
