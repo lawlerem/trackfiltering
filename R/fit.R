@@ -1,167 +1,190 @@
 #' Fit a model to a movement track
-#' 
-#' @param pings An sf data frame with a POSIX or numeric column named "date", a factor column named "class", and point geometries. If class is an ordered factor, then the estimated observation error variances will increase with class.
-#' @param nodes A vector of times used as nodes in the underlying spline.
-#' @param independent_coordinates If true, then observation ellipses are assumed to have
-#'   independent axes.
-#' @param common_coordinate_correlation If true, then observation ellipses for different
-#'   quality classes are assumed to have the same correlation structure.
-#' @param time_units Which time units should be used? Mostly matters for numerical stability.
-#' @param ... Additional arguments, particularly those to pass to nnspline::create_nnspline, robustifyRTMB::robustly_optimize, and mcreportRTMB::mcreport.
-#' 
-#' @return A list with the following:
-#'   - pings A copy of the provided location pings with an additional weights column giving the robust weight of each observation, an "est" geometry column giving the estimated location, and an "se" geometry column giving the standard errors around the estimate.
-#'   - interpolation An sf data.frame with a column giving the timestamp for the interpolation time, an "est" geometry column giving the estimated location, and an "se" geometry column giving the standard errors around the estimate.
-#'   - error_matrices A list of estimated observation error covariance matrices for each quality class.
-#'   - obj The RTMB::MakeADFun object used for the negative log-likelihood computation.
-#'   - par The estimated parameter list.
-#'   - opt The optimizer output.
-#'   - sdr See RTMB::sdreport
-#'   - sdr_est A list giving the estimates of model parameters and derived quantities
-#'   - sdr_se A list giving the standard errors of model parameters and derived quantities
+#'
+#' @param pings
+#'     An sf data frame with a POSIX or numeric column named "date",
+#'     a factor column named "class", and point geometries. If class is an
+#'     ordered factor, then the estimated observation error variances will
+#'     increase with class.
+#' @param nodes
+#'     A vector of times used as nodes in the underlying spline.
+#' @param independent_coordinates
+#'     If true, then observation ellipses are assumed to have independent axes.
+#' @param common_coordinate_correlation
+#'     If true, then observation ellipses for different quality classes are
+#'     assumed to have the same correlation structure.
+#' @param time_units
+#'     Which time units should be used? Mostly matters for numerical stability.
+#' @param ...
+#'     Additional arguments, particularly those to pass to
+#'     nnspline::create_nnspline, robustifyRTMB::robustly_optimize,
+#'     and mcreportRTMB::mcreport.
+#'
+#' @return 
+#'     A list with the following:
+#'   * pings
+#'       A copy of the provided location pings with an additional weights
+#'       column giving the robust weight of each observation, an "est"
+#'       column(s) giving the estimated locations, and an "se" column(s)
+#'       giving the standard errors around the estimated locations.
+#'   * error_matrices
+#'       A list of estimated observation error covariance matrices for each
+#'       quality class.
+#'   * template_spline
+#'       An nnspline object used to hold the nodes and node graph used for
+#'       the model.
+#'   * start_time
+#'       The date used for t = 0.
+#'   * robust_optimization
+#'       The output of robustifyRTMB::robustly_optimize
+#'   * mcreport
+#'       The output of mcreportRTMB::mcreport for the spline parameters,
+#'       node values, and coordinate means.
+#'   * call
+#'       The function call used.
 #'
 #' @export
-fit_track<- function(
+fit_track <- function(
         pings,
-        nodes = unique(pings$date),
+        nodes = pings$date |> unique(),
         independent_coordinates = FALSE,
         common_coordinate_correlation = TRUE,
         time_units = "days",
         ...
     ) {
-    call<- match.call(expand.dots = TRUE) |> as.list()
-    if( !("class" %in% colnames(pings)) ) pings$class<- rep(1, nrow(pings))
-    if( !is.factor(pings$class) ) pings$class<- as.factor(pings$class)
-    if( any(table(pings$class) > 0 & table(pings$class) <= 10) ) {
-        warning("One or more of the quality classes has 10 or fewer observations, which may cause estimation issues.")
+    call <- match.call(expand.dots = TRUE) |> as.list()
+    if( !("class" %in% (pings |> colnames())) ) {
+        pings$class <- 1 |> rep(pings |> nrow())
     }
+    if( !(pings$class |> is.factor()) ) pings$class <- pings$class |> as.factor()
+    if( any( 0 < table(pings$class) & table(pings$class) <= 10) ) {
+        warning(
+            paste0(
+                "One or more of the quality classes has 10 or",
+                "fewer observations, which may cause estimation issues."
+            )
+        )
+    }
+
+    time <- pings$date
+    start_time <- time |> min()
+    time <- time |> difftime(start_time, units = time_units) |> as.numeric()
+    nodes <- nodes |> difftime(start_time, units = time_units) |> as.numeric()
     
-    time<- pings$date
-    start_time<- min(time)
-    time<- difftime(
-        time,
-        start_time,
-        units = time_units
-    ) |> as.numeric()
-    nodes<- difftime(
-        nodes,
-        start_time,
-        units = time_units
-    ) |> as.numeric()
+    arg_names<- nnspline::create_nnspline |> formals() |> names()
+    spline_args <- call[(call |> names()) %in% arg_names]
+    spline_args$x <- time |> unique()
+    spline_args$nodes <- nodes |> unique()
+    spline <- nnspline::create_nnspline |> do.call(spline_args)
+    pings$spline_idx <- time |> nnspline::nns(spline, index = TRUE)
 
-    spline_args<- call[names(call) %in% names(formals(nnspline::create_nnspline))]
-    spline_args$x<- unique(time)
-    spline_args$nodes<- unique(nodes)
-    spline<- do.call(nnspline::create_nnspline, spline_args)
-    pings$spline_idx<- nnspline::nns(
-        time,
-        spline,
-        index = TRUE
-    )
-
-
-    robopt_args<- call[names(call) %in% names(formals(robustifyRTMB::robustly_optimize))]
-    environment(nll)<- environment()
-    robopt_args$func<- nll
-    robopt_args$parameters<- list(
+    arg_names<- robustifyRTMB::robustly_optimize |> formals() |> names()
+    robopt_args <- call[(call |> names()) %in% arg_names]
+    environment(nll) <- environment()
+    robopt_args$func <- nll
+    n_coords<- pings |> sf::st_coordinates() |> ncol()
+    robopt_args$parameters <- list(
         working_spline_parameters = matrix(
             0,
-            nrow = length(spline$parameters),
+            nrow = spline$parameters |> length(),
             ncol = 2
         ),
         node_values = matrix(
             0,
-            nrow = length(spline$node_values),
+            nrow = spline$node_values |> length(),
             ncol = 2
         ),
-        center = apply(sf::st_coordinates(pings), 2, mean),
+        center = pings |> sf::st_coordinates() |> apply(2, mean),
         working_ping_diagonal = matrix(
             0,
-            nrow = ncol(sf::st_coordinates(pings)),
-            ncol = length(levels(pings$class))
+            nrow = n_coords,
+            ncol = pings$class |> levels() |> length()
         ),
         ping_off_diagonal = matrix(
             0,
-            nrow = ncol(sf::st_coordinates(pings)) * (ncol(sf::st_coordinates(pings)) - 1) / 2,
-            ncol = length(levels(pings$class))
+            nrow = n_coords * (n_coords - 1) / 2,
+            ncol = pings$class |> levels() |> length()
         )
     )
-    map<- list(
+    map <- list(
         working_ping_diagonal = matrix(
-            seq_along(robopt_args$parameters$working_ping_diagonal),
-            nrow = nrow(robopt_args$parameters$working_ping_diagonal)
+            robopt_args$parameters$working_ping_diagonal |> seq_along(),
+            nrow = robopt_args$parameters$working_ping_diagonal |> nrow()
         ),
         ping_off_diagonal = matrix(
-            seq_along(robopt_args$parameters$ping_off_diagonal),
-            nrow = nrow(robopt_args$parameters$ping_off_diagonal)
+            robopt_args$parameters$ping_off_diagonal |> seq_along(),
+            nrow = robopt_args$parameters$ping_off_diagonal |> nrow()
         )
     )
-    missing_classes<- table(pings$class) == 0
-    robopt_args$parameters$working_ping_diagonal[, missing_classes]<- -10
-    map$working_ping_diagonal[, missing_classes]<- NA
-    map$ping_off_diagonal[, missing_classes]<- NA
-    if( common_coordinate_correlation ) {
-        map$ping_off_diagonal[]<- seq(nrow(map$ping_off_diagonal))
+    missing_classes <- table(pings$class) == 0
+    robopt_args$parameters$working_ping_diagonal[, missing_classes] <- -10
+    map$working_ping_diagonal[, missing_classes] <- NA
+    map$ping_off_diagonal[, missing_classes] <- NA
+    if (common_coordinate_correlation) {
+        map$ping_off_diagonal[] <- map$ping_off_diagonal |> nrow() |> seq()
     }
-    if( independent_coordinates ) {
-        robopt_args$parameters$ping_off_diagonal[]<- 0
-        map$ping_off_diagonal[]<- NA
+    if (independent_coordinates) {
+        robopt_args$parameters$ping_off_diagonal[] <- 0
+        map$ping_off_diagonal[] <- NA
     }
-    map<- lapply(map, as.factor)
-    robopt_args$map<- map
-    robopt_args$random<- c("node_values")
-    robopt_args$smooth<- c("node_values")
-    robopt_args$nodes<- spline$nodes
-    fit<- do.call(robustifyRTMB::robustly_optimize, robopt_args)
+    map <- map |> lapply(as.factor)
+    robopt_args$map <- map
+    robopt_args$random <- "node_values"
+    robopt_args$smooth <- "node_values"
+    robopt_args$nodes <- spline$nodes
+    fit <- robustifyRTMB::robustly_optimize |> do.call(robopt_args)
 
-    if( any(diag(fit$sdr$cov.fixed) <= 0) || any(is.nan(fit$sdr$cov.fixed) )  ) {
+    if( ((fit$sdr$cov.fixed |> diag()) <= 0) |>any() || 
+        fit$sdr$cov.fixed |> is.nan() |> any() ) {
         # If any observation error component is very small it can mess up sdreport
         #   So I'll fix them at their estimated value and re-run sdreport.
-        robopt_args$map$working_ping_diagonal<- as.factor(
+
+        robopt_args$map$working_ping_diagonal <- 
+            (fit$par$working_ping_diagonal <= -5) |> 
             ifelse(
-                fit$par$working_ping_diagonal <= -5,
                 NA,
-                seq_along(fit$par$working_ping_diagonal)
-            )
+                fit$par$working_ping_diagonal |> seq_along()
+            ) |>
+            as.factor()
+        robopt_args$map$robustness <- as.factor(NA)
+        robopt_args$parameters <- fit$par
+        robopt_args$silent <- TRUE
+        fit$obj <- RTMB::MakeADFun |> do.call(robopt_args)
+        fit$par <- fit$obj$env$parList()
+        fit$opt$par <- fit$obj$par
+        fit$sdr <- with(
+            fit,
+            obj |> RTMB::sdreport(opt$par, getJointPrecision = TRUE)
         )
-        robopt_args$map$robustness<- as.factor(NA)
-        robopt_args$parameters<- fit$par
-        robopt_args$silent<- TRUE
-        fit$obj<- do.call(RTMB::MakeADFun, robopt_args)
-        fit$par<- fit$obj$env$parList()
-        fit$opt$par<- fit$obj$par
-        fit$sdr<- RTMB::sdreport(fit$obj, fit$opt$par, getJointPrecision = TRUE)
     }
 
-    mcreport_args<- call[names(call) %in% names(formals(mcreportRTMB::mcreport))]
-    mcreport_args$obj<- fit$obj
-    mcreport_args$sdr<- fit$sdr
-    mc<- do.call(mcreportRTMB::mcreport, mcreport_args)
+    arg_names<- mcreportRTMB::mcreport |> formals() |> names()
+    mcreport_args <- call[(call |> names()) %in% arg_names]
+    mcreport_args$obj <- fit$obj
+    mcreport_args$sdr <- fit$sdr
+    mc <- mcreportRTMB::mcreport |> do.call(mcreport_args)
 
-    report<- fit$obj$report()
-    sdr_est<- as.list(fit$sdr, "Est", report = TRUE)
-    sdr_se<- as.list(fit$sdr, "Std", report = TRUE)
+    report <- fit$obj$report()
+    sdr_est <- fit$sdr |> as.list("Est", report = TRUE)
+    sdr_se <- fit$sdr |> as.list("Std", report = TRUE)
 
-    pings<- cbind(
+    pings <- cbind(
         weights = report$weights,
         est = sdr_est$predicted_coordinates[pings$spline_idx, ],
         se = sdr_se$predicted_coordinates[pings$spline_idx, ],
         pings
     )
-    pings$spline_idx<- NULL
-    
-    names(report$Sigma_q)<- levels(pings$class)
-    report$Sigma_q<- lapply(
-        names(report$Sigma_q),
-        function(class) {
-            if( missing_classes[[class]] ) {
-                return(NULL)
-            } else {
-                return(report$Sigma_q[[class]])
+    pings$spline_idx <- NULL
+
+    names(report$Sigma_q) <- pings$class |> levels()
+    report$Sigma_q <- report$Sigma_q |> 
+        names() |>
+        lapply(
+            function(class) {
+                if( missing_classes[[class]] ) return( NULL )
+                return( report$Sigma_q[[class]] )
             }
-        }
-    )
-    names(report$Sigma_q)<- levels(class)
+        )
+    names(report$Sigma_q) <- class |> levels()
 
     return(
         list(
@@ -170,7 +193,7 @@ fit_track<- function(
             template_spline = spline,
             start_time = start_time,
             time_units = time_units,
-            fit = fit,
+            robust_optimization = fit,
             mcreport = mc,
             call = call
         )
@@ -179,31 +202,35 @@ fit_track<- function(
 
 
 
-#' Predict a track
-#' 
-#' @param fit A fitted model from fit_track
-#' @param date The dates at which to predict
-#' @param quantiles The quantiles to predict. Defaults to a 95% confidence interval around the median
-#' 
-#' @return A list with the predicted quantiles of the coordinates  at each date and the posterior track samples. If length(quantiles) < 1 then only the posterior samples are returned.
-#' 
+#' Interpolate a fitted track at new dates.
+#'
+#' @param fit 
+#'     A fitted model from fit_track.
+#' @param date 
+#'     The dates at which to predict.
+#' @param quantiles 
+#'     The quantiles to predict. Defaults to 0.05, 0.5, and 0.95.
+#'
+#' @return 
+#'     A list with the predicted quantiles of the coordinates at each date and
+#'     the posterior track samples. If length(quantiles) < 1 then only the
+#'     posterior samples are returned.
+#'
 #' @export
-predict_track<- function(
+predict_track <- function(
         fit,
         date,
         quantiles = c(0.05, 0.5, 0.95)
     ) {
-    orig_date<- date
+    orig_date <- date
 
     # Convert time to timescale used for spline
-    date<- difftime(
-        date,
-        fit$start_time,
-        units = fit$time_units
-    ) |> as.numeric()
+    date <- date |> 
+        difftime(fit$start_time, units = fit$time_units) |> 
+        as.numeric()
 
     # Recreate spline with same node but x is updated to date
-    spline<- nnspline::create_nnspline(
+    spline <- nnspline::create_nnspline(
         x = date,
         nodes = fit$template_spline$nodes,
         n_parents = fit$template_spline$n_parents,
@@ -214,102 +241,107 @@ predict_track<- function(
     )
 
     # Predict coordinates for each replicate
-    mc<- fit$mcreport
-    mcreport_args<- fit$call[names(fit$call) %in% names(formals(mcreportRTMB::mcreport))]
-    parallel<- if( "parallel" %in% names(mcreport_args) ) mcreport_args$parallel else 1
-    silent<- if( "silent" %in% names(mcreport_args) ) mcreport_args$silent else TRUE
-    if( (parallel > 1) && requireNamespace("parallel", quietly = TRUE) ) {
-        lapplyfn<- parallel::mclapply
+    mc <- fit$mcreport
+    arg_names<- mcreportRTMB::mcreport |> formals() |> names()
+    mcreport_args <- fit$call[(fit$call |> names()) %in% arg_names]
+    parallel <- if( "parallel" %in% (mcreport_args |> names()) ) {
+        mcreport_args$parallel
     } else {
-        lapplyfn<- lapply
+        1
     }
-    replicates<- lapplyfn(
-        seq(ncol(mc[[1]])),
-        function(i, ...) {
-            if( !silent ) {
-                cat(
-                    paste0(
-                        "\rUpdating mcreplicate: (",
-                        i,
-                        " / ",
-                        ncol(mc[[1]]),
-                        ")"
-                    )
+    silent <- if( "silent" %in% (mcreport_args |> names()) ) {
+        mcreport_args$silent
+    } else {
+        TRUE
+    }
+    if( (parallel > 1) && requireNamespace("parallel", quietly = TRUE) ) {
+        lapplyfn <- parallel::mclapply
+    } else {
+        lapplyfn <- lapply
+    }
+    interpolate_replicate<- function(i, ...) {
+        if( !silent ) {
+            cat(
+                paste0(
+                    "\rUpdating mcreplicate: (", i, " / ", 
+                    mc[[1]] |> ncol(), ")"
                 )
-                if( i == ncol(mc[[1]]) ) cat("\n")
-                flush.console()
-            }
-            x_spline<- nnspline::update_spline(
-                spline,
+            )
+            if( i == (mc[[1]] |> ncol()) ) cat("\n")
+            flush.console()
+        }
+        x_spline <- spline |>
+            nnspline::update_spline(
                 parameters = mc$spline_parameters[, 1, i],
                 node_values = mc$node_values[, 1, i]
             )
-            y_spline<- nnspline::update_spline(
-                spline,
+        y_spline <- spline |>
+            nnspline::update_spline(
                 parameters = mc$spline_parameters[, 2, i],
                 node_values = mc$node_values[, 2, i]
             )
-            m<- cbind(
-                mc$center[1, i] + x_spline$values,
-                mc$center[2, i] + y_spline$values
-            )
-            m<- data.frame(
-                replicate = i,
-                date = orig_date,
-                geometry = m
-            )
-            return(m)
-        },
-        mc.cores = parallel,
-        mc.preschedule = FALSE
-    )
-    sample_tracks<- do.call(rbind, replicates)
-    sample_tracks<- sf::st_as_sf(
-        sample_tracks,
-        coords = 3:4,
-        crs = sf::st_crs(fit$pings)
-    )
-    rownames(sample_tracks)<- NULL
-
-    if( length(quantiles) < 1 ) return(sample_tracks)
-
-    quantiles<- sort(quantiles)
-    quantile_tracks<- do.call(
-        abind::abind,
-        c(
-            lapply(replicates, `[`, 3:4),
-            rev.along = 0
+        m <- cbind(
+            mc$center[1, i] + x_spline$values,
+            mc$center[2, i] + y_spline$values
         )
-    )
-    quantile_tracks<- apply(
-        quantile_tracks,
-        MARGIN = 1:2,
-        quantile,
-        probs = quantiles
-    )
-    quantile_tracks<- aperm(
-        quantile_tracks,
-        c(2:3, 1)
-    )
-    quantile_tracks<- lapply(
-        seq_along(quantiles),
-        function(i) {
-            m<- data.frame(
-                quantile = quantiles[i],
-                date = orig_date,
-                geometry = quantile_tracks[, , i[]]
+        m <- data.frame(
+            replicate = i,
+            date = orig_date,
+            geometry = m
+        )
+        return( m )
+    }
+    replicates <- seq(ncol(mc[[1]])) |> 
+        lapplyfn(
+            interpolate_replicate,
+            mc.cores = parallel,
+            mc.preschedule = FALSE
+        )
+    sample_tracks <- rbind |> do.call(replicates)
+    sample_tracks <- sample_tracks |> 
+        sf::st_as_sf(
+            coords = 3:4,
+            crs = fit$pings |> sf::st_crs()
+        )
+    rownames(sample_tracks) <- NULL
+    if( (quantiles |> length()) < 1 ) return( sample_tracks )
+
+
+    quantiles <- quantiles |> sort()
+    quantile_tracks <- abind::abind |> 
+        do.call(
+            c(
+                lapply(replicates, `[`, 3:4),
+                rev.along = 0
             )
-            return(m)
-        }
-    )
-    quantile_tracks<- do.call(rbind, quantile_tracks)
-    quantile_tracks<- sf::st_as_sf(
-        quantile_tracks,
-        coords = 3:4,
-        crs = sf::st_crs(fit$pings)
-    )
-    rownames(quantile_tracks)<- NULL
-    
+        )
+    quantile_tracks <- quantile_tracks |> 
+        apply(
+            MARGIN = 1:2,
+            quantile,
+            probs = quantiles
+        )
+    quantile_tracks <- quantile_tracks |> aperm(c(2:3, 1))
+    quantile_tracks <- quantiles |> 
+        seq_along() |>
+        lapply(
+            function(i) {
+                m <- data.frame(
+                    quantile = quantiles[i],
+                    date = orig_date,
+                    geometry = quantile_tracks[, , i]
+                )
+                return(m)
+            }
+        )
+    quantile_tracks <- rbind |> do.call(quantile_tracks)
+    quantile_tracks <- quantile_tracks |>
+        sf::st_as_sf(
+            coords = 3:4,
+            crs = fit$pings |> sf::st_crs()
+        )
+    rownames(quantile_tracks) <- NULL
+
     return(
         list(
             quantiles = quantile_tracks,
@@ -317,4 +349,3 @@ predict_track<- function(
         )
     )
 }
-

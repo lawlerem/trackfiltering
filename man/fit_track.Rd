@@ -14,32 +14,48 @@ fit_track(
 )
 }
 \arguments{
-\item{pings}{An sf data frame with a POSIX or numeric column named "date", a factor column named "class", and point geometries. If class is an ordered factor, then the estimated observation error variances will increase with class.}
+\item{pings}{An sf data frame with a POSIX or numeric column named "date",
+a factor column named "class", and point geometries. If class is an
+ordered factor, then the estimated observation error variances will
+increase with class.}
 
 \item{nodes}{A vector of times used as nodes in the underlying spline.}
 
-\item{independent_coordinates}{If true, then observation ellipses are assumed to have
-independent axes.}
+\item{independent_coordinates}{If true, then observation ellipses are assumed to have independent axes.}
 
-\item{common_coordinate_correlation}{If true, then observation ellipses for different
-quality classes are assumed to have the same correlation structure.}
+\item{common_coordinate_correlation}{If true, then observation ellipses for different quality classes are
+assumed to have the same correlation structure.}
 
 \item{time_units}{Which time units should be used? Mostly matters for numerical stability.}
 
-\item{...}{Additional arguments, particularly those to pass to nnspline::create_nnspline, robustifyRTMB::robustly_optimize, and mcreportRTMB::mcreport.}
+\item{...}{Additional arguments, particularly those to pass to
+nnspline::create_nnspline, robustifyRTMB::robustly_optimize,
+and mcreportRTMB::mcreport.}
 }
 \value{
-A list with the following:
+\if{html}{\out{<div class="sourceCode">}}\preformatted{A list with the following:
+}\if{html}{\out{</div>}}
 \itemize{
-\item pings A copy of the provided location pings with an additional weights column giving the robust weight of each observation, an "est" geometry column giving the estimated location, and an "se" geometry column giving the standard errors around the estimate.
-\item interpolation An sf data.frame with a column giving the timestamp for the interpolation time, an "est" geometry column giving the estimated location, and an "se" geometry column giving the standard errors around the estimate.
-\item error_matrices A list of estimated observation error covariance matrices for each quality class.
-\item obj The RTMB::MakeADFun object used for the negative log-likelihood computation.
-\item par The estimated parameter list.
-\item opt The optimizer output.
-\item sdr See RTMB::sdreport
-\item sdr_est A list giving the estimates of model parameters and derived quantities
-\item sdr_se A list giving the standard errors of model parameters and derived quantities
+\item pings
+A copy of the provided location pings with an additional weights
+column giving the robust weight of each observation, an "est"
+column(s) giving the estimated locations, and an "se" column(s)
+giving the standard errors around the estimated locations.
+\item error_matrices
+A list of estimated observation error covariance matrices for each
+quality class.
+\item template_spline
+An nnspline object used to hold the nodes and node graph used for
+the model.
+\item start_time
+The date used for t = 0.
+\item robust_optimization
+The output of robustifyRTMB::robustly_optimize
+\item mcreport
+The output of mcreportRTMB::mcreport for the spline parameters,
+node values, and coordinate means.
+\item call
+The function call used.
 }
 }
 \description{

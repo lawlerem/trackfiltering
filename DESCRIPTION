@@ -10,9 +10,9 @@ Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
 Imports: 
-    mcreportRTMB (>= 0.1.1),
-    nnspline (>= 1.4.0),
-    robustifyRTMB (>= 0.0.1),
+    mcreportRTMB (>= 0.1.3),
+    nnspline (>= 1.4.1),
+    robustifyRTMB (>= 0.1.0),
     RTMB,
     sf
 Remotes:
@@ -20,5 +20,5 @@ Remotes:
     lawlerem/nnspline,
     lawlerem/robustifyRTMB
 Depends: 
-    R (>= 2.10)
+    R (>= 4.1.0)
 LazyData: true
