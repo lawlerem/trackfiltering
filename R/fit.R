@@ -93,7 +93,7 @@ fit_track <- function(
             nrow = spline$node_values |> length(),
             ncol = 2
         ),
-        center = pings |> sf::st_coordinates() |> apply(2, mean),
+        center = pings |> sf::st_coordinates() |> apply(2, median),
         working_ping_diagonal = matrix(
             0,
             nrow = n_coords,
@@ -106,6 +106,10 @@ fit_track <- function(
         )
     )
     map <- list(
+        center = rep(
+            NA,
+            length = robopt_args$parameters$center |> length(),
+        ),
         working_ping_diagonal = matrix(
             robopt_args$parameters$working_ping_diagonal |> seq_along(),
             nrow = robopt_args$parameters$working_ping_diagonal |> nrow()
