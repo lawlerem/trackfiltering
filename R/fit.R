@@ -72,7 +72,15 @@ fit_track <- function(
     
     arg_names<- nnspline::create_nnspline |> formals() |> names()
     spline_args <- call[(call |> names()) %in% arg_names]
-    spline_args$x <- time |> unique()
+    if( "x" %in% names(spline_args) ) {
+        spline_args$x<- spline_args$x |> 
+            eval(parent.frame()) |>
+            unique() |> 
+            difftime(start_time, units = time_units) |>
+            as.numeric()
+    } else {
+        spline_args$x <- time |> unique()
+    }
     spline_args$nodes <- nodes |> unique()
     spline <- nnspline::create_nnspline |> do.call(spline_args)
     pings$spline_idx <- time |> nnspline::nns(spline, index = TRUE)
