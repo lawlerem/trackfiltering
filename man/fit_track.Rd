@@ -6,10 +6,10 @@
 \usage{
 fit_track(
   pings,
-  nodes = unique(pings$date),
+  time_mesh = unique(pings$date),
+  time_units = "days",
   independent_coordinates = FALSE,
   common_coordinate_correlation = TRUE,
-  time_units = "days",
   ...
 )
 }
@@ -19,17 +19,17 @@ a factor column named "class", and point geometries. If class is an
 ordered factor, then the estimated observation error variances will
 increase with class.}
 
-\item{nodes}{A vector of times used as nodes in the underlying spline.}
+\item{time_mesh}{A vector of times used to discretize movement.}
+
+\item{time_units}{Which time units should be used? Mostly matters for numerical stability.}
 
 \item{independent_coordinates}{If true, then observation ellipses are assumed to have independent axes.}
 
 \item{common_coordinate_correlation}{If true, then observation ellipses for different quality classes are
 assumed to have the same correlation structure.}
 
-\item{time_units}{Which time units should be used? Mostly matters for numerical stability.}
-
 \item{...}{Additional arguments, particularly those to pass to
-nnspline::create_nnspline, robustifyRTMB::robustly_optimize,
+nnspline::create_lcspline, robustifyRTMB::robustly_optimize,
 and mcreportRTMB::mcreport.}
 }
 \value{

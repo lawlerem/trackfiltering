@@ -5,18 +5,18 @@
 #'     a factor column named "class", and point geometries. If class is an
 #'     ordered factor, then the estimated observation error variances will
 #'     increase with class.
-#' @param nodes
-#'     A vector of times used as nodes in the underlying spline.
+#' @param time_mesh
+#'     A vector of times used to discretize movement.
+#' @param time_units
+#'     Which time units should be used? Mostly matters for numerical stability.
 #' @param independent_coordinates
 #'     If true, then observation ellipses are assumed to have independent axes.
 #' @param common_coordinate_correlation
 #'     If true, then observation ellipses for different quality classes are
 #'     assumed to have the same correlation structure.
-#' @param time_units
-#'     Which time units should be used? Mostly matters for numerical stability.
 #' @param ...
 #'     Additional arguments, particularly those to pass to
-#'     nnspline::create_nnspline, robustifyRTMB::robustly_optimize,
+#'     nnspline::create_lcspline, robustifyRTMB::robustly_optimize,
 #'     and mcreportRTMB::mcreport.
 #'
 #' @return 
@@ -45,10 +45,10 @@
 #' @export
 fit_track <- function(
         pings,
-        nodes = pings$date |> unique(),
+        time_mesh = pings$date |> unique(),
+        time_units = "days",
         independent_coordinates = FALSE,
         common_coordinate_correlation = TRUE,
-        time_units = "days",
         ...
     ) {
     call <- match.call(expand.dots = TRUE) |> as.list()
@@ -59,31 +59,20 @@ fit_track <- function(
     if( any( 0 < table(pings$class) & table(pings$class) <= 10) ) {
         warning(
             paste0(
-                "One or more of the quality classes has 10 or",
+                "One or more of the quality classes has 10 or ",
                 "fewer observations, which may cause estimation issues."
             )
         )
     }
-
-    time <- pings$date
-    start_time <- time |> min()
-    time <- time |> difftime(start_time, units = time_units) |> as.numeric()
-    nodes <- nodes |> difftime(start_time, units = time_units) |> as.numeric()
     
-    arg_names<- nnspline::create_nnspline |> formals() |> names()
-    spline_args <- call[(call |> names()) %in% arg_names]
-    if( "x" %in% names(spline_args) ) {
-        spline_args$x<- spline_args$x |> 
-            eval(parent.frame()) |>
-            unique() |> 
-            difftime(start_time, units = time_units) |>
-            as.numeric()
-    } else {
-        spline_args$x <- time |> unique()
-    }
-    spline_args$nodes <- nodes |> unique()
-    spline <- nnspline::create_nnspline |> do.call(spline_args)
-    pings$spline_idx <- time |> nnspline::nns(spline, index = TRUE)
+    arg_names<- nnspline::create_lcspline |> formals() |> names()
+    spline_args<- call[names(call) %in% arg_names]
+    spline_args$x<- time_mesh |> head(-1)
+    # spline<- time_mesh |> head(-1) |> nnspline::create_lcspline(...)
+    spline<- nnspline::create_lcspline |> do.call(spline_args)
+    pings$spline_idx<- pings |> 
+        _$date |> 
+        cut(time_mesh, labels = FALSE, include.lowest = TRUE)
 
     arg_names<- robustifyRTMB::robustly_optimize |> formals() |> names()
     robopt_args <- call[(call |> names()) %in% arg_names]
@@ -91,17 +80,14 @@ fit_track <- function(
     robopt_args$func <- nll
     n_coords<- pings |> sf::st_coordinates() |> ncol()
     robopt_args$parameters <- list(
-        working_spline_parameters = matrix(
-            0,
-            nrow = spline$parameters |> length(),
-            ncol = 2
+        qstretch = numeric(2),
+        log_height = numeric(2),
+        coordinates = matrix(
+            pings |> sf::st_coordinates() |> apply(2, median),
+            nrow = time_mesh |> length(),
+            ncol = 2,
+            byrow = TRUE
         ),
-        node_values = matrix(
-            0,
-            nrow = spline$node_values |> length(),
-            ncol = 2
-        ),
-        center = pings |> sf::st_coordinates() |> apply(2, median),
         working_ping_diagonal = matrix(
             0,
             nrow = n_coords,
@@ -114,10 +100,6 @@ fit_track <- function(
         )
     )
     map <- list(
-        center = rep(
-            NA,
-            length = robopt_args$parameters$center |> length(),
-        ),
         working_ping_diagonal = matrix(
             robopt_args$parameters$working_ping_diagonal |> seq_along(),
             nrow = robopt_args$parameters$working_ping_diagonal |> nrow()
@@ -140,9 +122,9 @@ fit_track <- function(
     }
     map <- map |> lapply(as.factor)
     robopt_args$map <- map
-    robopt_args$random <- "node_values"
-    robopt_args$smooth <- "node_values"
-    robopt_args$nodes <- spline$nodes
+    robopt_args$random <- "coordinates"
+    robopt_args$smooth <- "coordinates"
+    robopt_args$nodes <- time_mesh
     fit <- robustifyRTMB::robustly_optimize |> do.call(robopt_args)
 
     if( ((fit$sdr$cov.fixed |> diag()) <= 0) |>any() || 
@@ -176,13 +158,13 @@ fit_track <- function(
     mc <- mcreportRTMB::mcreport |> do.call(mcreport_args)
 
     report <- fit$obj$report()
-    sdr_est <- fit$sdr |> as.list("Est", report = TRUE)
-    sdr_se <- fit$sdr |> as.list("Std", report = TRUE)
+    sdr_est <- fit$sdr |> as.list("Est")
+    sdr_se <- fit$sdr |> as.list("Std")
 
     pings <- cbind(
         weights = report$weights,
-        est = sdr_est$predicted_coordinates[pings$spline_idx, ],
-        se = sdr_se$predicted_coordinates[pings$spline_idx, ],
+        est = sdr_est$coordinates[pings$spline_idx, ],
+        se = sdr_se$coordinates[pings$spline_idx, ],
         pings
     )
     pings$spline_idx <- NULL
@@ -198,13 +180,19 @@ fit_track <- function(
         )
     names(report$Sigma_q) <- class |> levels()
 
+    track<- data.frame(
+            date = time_mesh,
+            sdr_est$coordinates,
+            std.error = sdr_se$coordinates
+        ) |>
+        sf::st_as_sf(coords = 2:3)
+
     return(
         list(
             pings = pings,
+            track = track,
             error_matrices = report$Sigma_q,
-            template_spline = spline,
-            start_time = start_time,
-            time_units = time_units,
+            spline = spline,
             robust_optimization = fit,
             mcreport = mc,
             call = call

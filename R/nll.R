@@ -21,36 +21,26 @@ nll<- function(pars) {
     pars |> RTMB::getAll()
     ll<- 0
 
+    ll<- ll + sum(RTMB::dnorm(qstretch, 0.5, 1, TRUE))
+    stretch<- RTMB::plogis(qstretch)
+    height<- exp(log_height)
+
     # Track likelihood and predictions
-    spline_parameters = working_spline_parameters |> exp()
-    x_spline<- spline |>
-        nnspline::update_spline(
-            parameters = spline_parameters[, 1],
-            node_values = node_values[, 1]
-        )
-    ll<- ll + nnspline::dspline(
-        node_values[, 1],
-        x_spline,
+    ll<- ll + nnspline::dlcspline(
+        diff(coordinates[, 1]) / as.numeric(diff(time_mesh)),
+        spline,
+        stretch[1],
+        height[1],
         log = TRUE
     )
-    y_spline<- spline |>
-        nnspline::update_spline(
-            parameters = spline_parameters[, 2],
-            node_values = node_values[, 2]
-        )
-    ll<- ll + nnspline::dspline(
-        node_values[, 2],
-        y_spline,
+    ll<- ll + nnspline::dlcspline(
+        diff(coordinates[, 2]) / as.numeric(diff(time_mesh)),
+        spline,
+        stretch[2],
+        height[2],
         log = TRUE
     )
-    predicted_coordinates<- cbind(
-        center[1] + x_spline$values,
-        center[2] + y_spline$values
-    )
-    spline_parameters |> mcreportRTMB::MCREPORT()
-    node_values |> mcreportRTMB::MCREPORT()
-    center |> mcreportRTMB::MCREPORT()
-    predicted_coordinates |> RTMB::ADREPORT()
+    coordinates |> mcreportRTMB::MCREPORT()
 
     # Ping likelihood and robust weights
     ping_diagonal<- working_ping_diagonal |> exp()
@@ -72,17 +62,17 @@ nll<- function(pars) {
         )
     Sigma_q |> RTMB::REPORT()
 
-    raw_ll<- pings |> nrow() |> numeric() |> RTMB::AD()
+    ping_ll<- pings |> nrow() |> numeric() |> RTMB::AD()
     for( i in pings |> nrow() |> seq() ) {
-        raw_ll[i]<- RTMB::dmvnorm(
+        ping_ll[[i]]<- RTMB::dmvnorm(
             sf::st_coordinates(pings)[i, ],
-            predicted_coordinates[pings$spline_idx[i], ],
+            coordinates[pings$spline_idx[i], ],
             Sigma_q[[pings$class[i]]],
             log = TRUE
         )
     }
-    ll<- ll + sum(robustifyRTMB::robustify(raw_ll, robustness, "ll"))
-    weights<- raw_ll |> robustifyRTMB::robust_weight(robustness, "ll")
+    ll<- ll + sum(robustifyRTMB::robustify(ping_ll, robustness, "ll"))
+    weights<- ping_ll |> robustifyRTMB::robust_weight(robustness, "ll")
     weights |> RTMB::REPORT()
     return( -ll )
 }
