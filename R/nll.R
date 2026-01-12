@@ -43,20 +43,22 @@ nll<- function(pars) {
     coordinates |> mcreportRTMB::MCREPORT()
 
     # Ping likelihood and robust weights
-    ping_diagonal<- working_ping_diagonal |> exp()
+    ping_scale<- working_ping_scale |> exp()
     if( pings$class |> is.ordered() ) {
         for( i in ping_diagonal |> nrow() |> seq() ) {
             ping_diagonal[i, ]<- ping_diagonal[i, ] |> cumsum()
         }
     }
-    Sigma_q<- ping_diagonal |>
-        ncol() |> 
-        seq() |> 
+    Sigma_q<- ping_scale |>
+        seq_along() |> 
         lapply(
             function(q) {
-                cor<- ping_off_diagonal[, q] |> theta2cor()
-                Sigma<- ping_diagonal[, q] |> RTMB::diag()
-                Sigma<- Sigma %*% cor %*% Sigma
+                orient<- working_ping_orientation[, q] |> theta2cor()
+                shape<- working_ping_shape[, q] |>
+                    exp() |>
+                    (\(x) RTMB::diag(c(RTMB::AD(1), x)))()
+                scale<- ping_scale[q]
+                Sigma<- scale * (shape %*% orient %*% shape)
                 return(Sigma)
             }
         )

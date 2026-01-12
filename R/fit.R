@@ -47,8 +47,10 @@ fit_track <- function(
         pings,
         time_mesh = pings$date |> unique(),
         time_units = "days",
-        independent_coordinates = FALSE,
-        common_coordinate_correlation = TRUE,
+        ping_common_orientation = TRUE,
+        ping_standard_orientation = FALSE,
+        ping_common_shape = TRUE,
+        ping_equal_shape = FALSE,
         ...
     ) {
     call <- match.call(expand.dots = TRUE) |> as.list()
@@ -89,38 +91,52 @@ fit_track <- function(
             ncol = 2,
             byrow = TRUE
         ),
-        working_ping_diagonal = matrix(
-            0,
-            nrow = n_coords,
-            ncol = pings$class |> levels() |> length()
-        ),
-        ping_off_diagonal = matrix(
+        working_ping_orientation = matrix(
             0,
             nrow = n_coords * (n_coords - 1) / 2,
             ncol = pings$class |> levels() |> length()
-        )
+        ),
+        working_ping_shape = matrix(
+            0,
+            nrow = n_coords - 1,
+            ncol = pings$class |> levels() |> length(),
+        ),
+        working_ping_scale = pings$class |> levels() |> length() |> numeric()
     )
     map <- list(
-        working_ping_diagonal = matrix(
-            robopt_args$parameters$working_ping_diagonal |> seq_along(),
-            nrow = robopt_args$parameters$working_ping_diagonal |> nrow()
+        working_ping_orientation = matrix(
+            robopt_args$parameters$working_ping_orientation |> seq_along(),
+            nrow = robopt_args$parameters$working_ping_orientation |> nrow()
         ),
-        ping_off_diagonal = matrix(
-            robopt_args$parameters$ping_off_diagonal |> seq_along(),
-            nrow = robopt_args$parameters$ping_off_diagonal |> nrow()
-        )
+        working_ping_shape = matrix(
+            robopt_args$parameters$working_ping_shape |> seq_along(),
+            nrow = robopt_args$parameters$working_ping_shape |> nrow()
+        ),
+        working_ping_scale = robopt_args$parameters$working_ping_scale |> 
+            seq_along()
     )
     missing_classes <- table(pings$class) == 0
-    robopt_args$parameters$working_ping_diagonal[, missing_classes] <- -10
-    map$working_ping_diagonal[, missing_classes] <- NA
-    map$ping_off_diagonal[, missing_classes] <- NA
-    if (common_coordinate_correlation) {
-        map$ping_off_diagonal[] <- map$ping_off_diagonal |> nrow() |> seq()
+    map$working_ping_orientation[, missing_classes] <- NA
+    map$working_ping_shape[, missing_classes] <- NA
+    robopt_args$parameters$working_ping_scale[missing_classes] <- -10
+    map$working_ping_scale[missing_classes]<- NA
+    if( ping_common_orientation ) {
+        map$working_ping_orientation[] <- map$working_ping_orientation |>
+            nrow() |> 
+            seq()
     }
-    if (independent_coordinates) {
-        robopt_args$parameters$ping_off_diagonal[] <- 0
-        map$ping_off_diagonal[] <- NA
+    if( ping_common_shape ) {
+        map$working_ping_shape[] <- map$working_ping_shape |>
+            nrow() |>
+            seq()
     }
+    if( ping_standard_orientation ) {
+        map$working_ping_orientation[]<- NA
+    }
+    if( ping_equal_shape ) {
+        map$working_ping_shape[]<- NA
+    }
+
     map <- map |> lapply(as.factor)
     robopt_args$map <- map
     robopt_args$random <- "coordinates"
