@@ -67,8 +67,9 @@ fit_track <- function(
     
     arg_names<- nnspline::create_lcspline |> formals() |> names()
     spline_args<- call[names(call) %in% arg_names]
-    spline_args$x<- time_mesh |> head(-1)
-    # spline<- time_mesh |> head(-1) |> nnspline::create_lcspline(...)
+    spline_args$x<- time_mesh |>
+        difftime(time_mesh[1], units = time_units) |>
+        tail(-1)
     spline<- nnspline::create_lcspline |> do.call(spline_args)
     pings$spline_idx<- pings |> 
         _$date |> 
