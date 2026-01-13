@@ -202,7 +202,10 @@ fit_track <- function(
             sdr_est$coordinates,
             std.error = sdr_se$coordinates
         ) |>
-        sf::st_as_sf(coords = 2:3)
+        sf::st_as_sf(
+            coords = 2:3,
+            crs = sf::st_crs(pings)
+        )
 
     return(
         list(
