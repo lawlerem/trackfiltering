@@ -9,11 +9,19 @@
 #'     A vector of times used to discretize movement.
 #' @param time_units
 #'     Which time units should be used? Mostly matters for numerical stability.
-#' @param independent_coordinates
-#'     If true, then observation ellipses are assumed to have independent axes.
-#' @param common_coordinate_correlation
-#'     If true, then observation ellipses for different quality classes are
-#'     assumed to have the same correlation structure.
+#' @param ping_common_orientation
+#'     If true, all classes' error ellipses will have the same orientation.
+#' @param ping_standard_orientation
+#'     If true, all classes' error ellipses will be oriented along the
+#'         coordinate axes, i.e. have uncorrelated components.
+#' @param ping_common_shape
+#'     If true, all classes' error ellipses will have the same shape, i.e. the
+#'         ratio of the standard deviation of coordinates over the standard
+#'         deviation of the first coordinate.
+#' @param ping_equal_shape
+#'     If true, all classes' error ellipses will have unit shape for all
+#'         coordinates, i.e. have the same standard deviation for each 
+#'         coordinate.
 #' @param ...
 #'     Additional arguments, particularly those to pass to
 #'     nnspline::create_lcspline, robustifyRTMB::robustly_optimize,
@@ -71,7 +79,7 @@ fit_track <- function(
     spline_args<- call[names(call) %in% arg_names]
     spline_args$x<- time_mesh |>
         difftime(time_mesh[1], units = time_units) |>
-        tail(-1)
+        utils::tail(-1)
     spline<- nnspline::create_lcspline |> do.call(spline_args)
     pings$spline_idx<- pings |> 
         _$date |> 
@@ -86,7 +94,7 @@ fit_track <- function(
         qstretch = numeric(2),
         log_height = numeric(2),
         coordinates = matrix(
-            pings |> sf::st_coordinates() |> apply(2, median),
+            pings |> sf::st_coordinates() |> apply(2, stats::median),
             nrow = time_mesh |> length(),
             ncol = 2,
             byrow = TRUE
@@ -216,156 +224,6 @@ fit_track <- function(
             robust_optimization = fit,
             mcreport = mc,
             call = call
-        )
-    )
-}
-
-
-
-#' Interpolate a fitted track at new dates.
-#'
-#' @param fit 
-#'     A fitted model from fit_track.
-#' @param date 
-#'     The dates at which to predict.
-#' @param quantiles 
-#'     The quantiles to predict. Defaults to 0.05, 0.5, and 0.95.
-#'
-#' @return 
-#'     A list with the predicted quantiles of the coordinates at each date and
-#'     the posterior track samples. If length(quantiles) < 1 then only the
-#'     posterior samples are returned.
-#'
-#' @export
-predict_track <- function(
-        fit,
-        date,
-        quantiles = c(0.05, 0.5, 0.95)
-    ) {
-    orig_date <- date
-
-    # Convert time to timescale used for spline
-    date <- date |> 
-        difftime(fit$start_time, units = fit$time_units) |> 
-        as.numeric()
-
-    # Recreate spline with same node but x is updated to date
-    spline <- nnspline::create_nnspline(
-        x = date,
-        nodes = fit$template_spline$nodes,
-        n_parents = fit$template_spline$n_parents,
-        parameters = fit$template_spline$parameters,
-        covariance_function = fit$template_spline$covariance_function,
-        node_graph = fit$template_spline$node_graph,
-        LT = fit$template_spline$LT
-    )
-
-    # Predict coordinates for each replicate
-    mc <- fit$mcreport
-    arg_names<- mcreportRTMB::mcreport |> formals() |> names()
-    mcreport_args <- fit$call[(fit$call |> names()) %in% arg_names]
-    parallel <- if( "parallel" %in% (mcreport_args |> names()) ) {
-        mcreport_args$parallel
-    } else {
-        1
-    }
-    silent <- if( "silent" %in% (mcreport_args |> names()) ) {
-        mcreport_args$silent
-    } else {
-        TRUE
-    }
-    if( (parallel > 1) && requireNamespace("parallel", quietly = TRUE) ) {
-        lapplyfn <- parallel::mclapply
-    } else {
-        lapplyfn <- lapply
-    }
-    interpolate_replicate<- function(i, ...) {
-        if( !silent ) {
-            cat(
-                paste0(
-                    "\rUpdating mcreplicate: (", i, " / ", 
-                    mc[[1]] |> ncol(), ")"
-                )
-            )
-            if( i == (mc[[1]] |> ncol()) ) cat("\n")
-            flush.console()
-        }
-        x_spline <- spline |>
-            nnspline::update_spline(
-                parameters = mc$spline_parameters[, 1, i],
-                node_values = mc$node_values[, 1, i]
-            )
-        y_spline <- spline |>
-            nnspline::update_spline(
-                parameters = mc$spline_parameters[, 2, i],
-                node_values = mc$node_values[, 2, i]
-            )
-        m <- cbind(
-            mc$center[1, i] + x_spline$values,
-            mc$center[2, i] + y_spline$values
-        )
-        m <- data.frame(
-            replicate = i,
-            date = orig_date,
-            geometry = m
-        )
-        return( m )
-    }
-    replicates <- seq(ncol(mc[[1]])) |> 
-        lapplyfn(
-            interpolate_replicate,
-            mc.cores = parallel,
-            mc.preschedule = FALSE
-        )
-    sample_tracks <- rbind |> do.call(replicates)
-    sample_tracks <- sample_tracks |> 
-        sf::st_as_sf(
-            coords = 3:4,
-            crs = fit$pings |> sf::st_crs()
-        )
-    rownames(sample_tracks) <- NULL
-    if( (quantiles |> length()) < 1 ) return( sample_tracks )
-
-
-    quantiles <- quantiles |> sort()
-    quantile_tracks <- abind::abind |> 
-        do.call(
-            c(
-                lapply(replicates, `[`, 3:4),
-                rev.along = 0
-            )
-        )
-    quantile_tracks <- quantile_tracks |> 
-        apply(
-            MARGIN = 1:2,
-            quantile,
-            probs = quantiles
-        )
-    quantile_tracks <- quantile_tracks |> aperm(c(2:3, 1))
-    quantile_tracks <- quantiles |> 
-        seq_along() |>
-        lapply(
-            function(i) {
-                m <- data.frame(
-                    quantile = quantiles[i],
-                    date = orig_date,
-                    geometry = quantile_tracks[, , i]
-                )
-                return(m)
-            }
-        )
-    quantile_tracks <- rbind |> do.call(quantile_tracks)
-    quantile_tracks <- quantile_tracks |>
-        sf::st_as_sf(
-            coords = 3:4,
-            crs = fit$pings |> sf::st_crs()
-        )
-    rownames(quantile_tracks) <- NULL
-
-    return(
-        list(
-            quantiles = quantile_tracks,
-            samples = sample_tracks
         )
     )
 }

@@ -8,8 +8,10 @@ fit_track(
   pings,
   time_mesh = unique(pings$date),
   time_units = "days",
-  independent_coordinates = FALSE,
-  common_coordinate_correlation = TRUE,
+  ping_common_orientation = TRUE,
+  ping_standard_orientation = FALSE,
+  ping_common_shape = TRUE,
+  ping_equal_shape = FALSE,
   ...
 )
 }
@@ -23,10 +25,18 @@ increase with class.}
 
 \item{time_units}{Which time units should be used? Mostly matters for numerical stability.}
 
-\item{independent_coordinates}{If true, then observation ellipses are assumed to have independent axes.}
+\item{ping_common_orientation}{If true, all classes' error ellipses will have the same orientation.}
 
-\item{common_coordinate_correlation}{If true, then observation ellipses for different quality classes are
-assumed to have the same correlation structure.}
+\item{ping_standard_orientation}{If true, all classes' error ellipses will be oriented along the
+coordinate axes, i.e. have uncorrelated components.}
+
+\item{ping_common_shape}{If true, all classes' error ellipses will have the same shape, i.e. the
+ratio of the standard deviation of coordinates over the standard
+deviation of the first coordinate.}
+
+\item{ping_equal_shape}{If true, all classes' error ellipses will have unit shape for all
+coordinates, i.e. have the same standard deviation for each
+coordinate.}
 
 \item{...}{Additional arguments, particularly those to pass to
 nnspline::create_lcspline, robustifyRTMB::robustly_optimize,
