@@ -6,6 +6,7 @@
 #' @importFrom mcreportRTMB MCREPORT
 #' @importFrom nnspline create_lcspline
 #' @importFrom nnspline dlcspline
+#' @importFrom nnspline update_parameters
 #' @importFrom robustifyRTMB robustly_optimize
 #' @importFrom RTMB AD
 #' @importFrom RTMB ADREPORT

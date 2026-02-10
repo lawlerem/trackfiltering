@@ -75,12 +75,12 @@ fit_track <- function(
         )
     }
     
-    arg_names<- nnspline::create_lcspline |> formals() |> names()
+    arg_names<- nnspline::create_nnspline |> formals() |> names()
     spline_args<- call[names(call) %in% arg_names]
     spline_args$x<- time_mesh |>
         difftime(time_mesh[1], units = time_units) |>
         utils::tail(-1)
-    spline<- nnspline::create_lcspline |> do.call(spline_args)
+    spline<- nnspline::create_nnspline |> do.call(spline_args)
     pings$spline_idx<- pings |> 
         _$date |> 
         cut(time_mesh, labels = FALSE, include.lowest = TRUE)
@@ -91,8 +91,7 @@ fit_track <- function(
     robopt_args$func <- nll
     n_coords<- pings |> sf::st_coordinates() |> ncol()
     robopt_args$parameters <- list(
-        qstretch = numeric(2),
-        log_height = numeric(2),
+        spline_pars = matrix(0, nrow = 2, ncol = 2),
         coordinates = matrix(
             pings |> sf::st_coordinates() |> apply(2, stats::median),
             nrow = time_mesh |> length(),
