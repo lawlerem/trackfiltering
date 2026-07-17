@@ -77,9 +77,10 @@ fit_track <- function(
     
     arg_names<- nnspline::create_nnspline |> formals() |> names()
     spline_args<- call[names(call) %in% arg_names]
-    spline_args$x<- time_mesh |>
+    num_time_mesh<- time_mesh |> 
         difftime(time_mesh[1], units = time_units) |>
-        utils::tail(-1)
+        as.numeric()
+    spline_args$x<- num_time_mesh |> utils::tail(-1)
     spline<- nnspline::create_nnspline |> do.call(spline_args)
     pings$spline_idx<- pings |> 
         _$date |> 
@@ -149,6 +150,7 @@ fit_track <- function(
     robopt_args$random <- "coordinates"
     robopt_args$smooth <- "coordinates"
     robopt_args$nodes <- time_mesh
+    ping_coordinates<- sf::st_coordinates(pings)
     fit <- robustifyRTMB::robustly_optimize |> do.call(robopt_args)
 
     if( ((fit$sdr$cov.fixed |> diag()) <= 0) |>any() || 

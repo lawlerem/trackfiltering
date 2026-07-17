@@ -21,17 +21,18 @@ nll<- function(pars) {
     pars |> RTMB::getAll()
     ll<- 0
 
-
     # Track likelihood and predictions
     spline<- spline |> update_parameters(exp(spline_pars[, 1]))
+    ll<- ll + RTMB::dflat(coordinates[1, 1], log = TRUE)
+    ll<- ll + RTMB::dflat(coordinates[1, 2], log = TRUE)
     ll<- ll + nnspline::dspline(
-        diff(coordinates[, 1]) / as.numeric(diff(time_mesh)),
+        diff(coordinates[, 1]) / diff(num_time_mesh),
         spline,
         log = TRUE
     )
     spline<- spline |> nnspline::update_parameters(exp(spline_pars[, 2]))
     ll<- ll + nnspline::dspline(
-        diff(coordinates[, 2]) / as.numeric(diff(time_mesh)),
+        diff(coordinates[, 2]) / diff(num_time_mesh),
         spline,
         log = TRUE
     )
@@ -60,9 +61,11 @@ nll<- function(pars) {
     Sigma_q |> RTMB::REPORT()
 
     ping_ll<- pings |> nrow() |> numeric() |> RTMB::AD()
+    ping_coordinates<- RTMB::OBS(ping_coordinates)
     for( i in pings |> nrow() |> seq() ) {
         ping_ll[[i]]<- RTMB::dmvnorm(
-            sf::st_coordinates(pings)[i, ],
+            # sf::st_coordinates(pings)[i, ],
+            ping_coordinates[i, ],
             coordinates[pings$spline_idx[i], ],
             Sigma_q[[pings$class[i]]],
             log = TRUE
