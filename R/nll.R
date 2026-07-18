@@ -22,18 +22,21 @@ nll<- function(pars) {
     ll<- 0
 
     # Track likelihood and predictions
-    spline<- spline |> update_parameters(exp(spline_pars[, 1]))
+    ll<- ll + sum(RTMB::dnorm(qstretch, 0, 1, log = TRUE))
     ll<- ll + RTMB::dflat(coordinates[1, 1], log = TRUE)
     ll<- ll + RTMB::dflat(coordinates[1, 2], log = TRUE)
-    ll<- ll + nnspline::dspline(
+    ll<- ll + nnspline::dlcspline(
         diff(coordinates[, 1]) / diff(num_time_mesh),
         spline,
+        RTMB::plogis(qstretch[1]),
+        exp(lheight[1]),
         log = TRUE
     )
-    spline<- spline |> nnspline::update_parameters(exp(spline_pars[, 2]))
-    ll<- ll + nnspline::dspline(
+    ll<- ll + nnspline::dlcspline(
         diff(coordinates[, 2]) / diff(num_time_mesh),
         spline,
+        RTMB::plogis(qstretch[2]),
+        exp(lheight[2]),
         log = TRUE
     )
     coordinates |> mcreportRTMB::MCREPORT()

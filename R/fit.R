@@ -59,6 +59,8 @@ fit_track <- function(
         ping_standard_orientation = FALSE,
         ping_common_shape = TRUE,
         ping_equal_shape = FALSE,
+        track_equal_stretch = TRUE,
+        track_equal_height = FALSE,
         ...
     ) {
     call <- match.call(expand.dots = TRUE) |> as.list()
@@ -75,13 +77,13 @@ fit_track <- function(
         )
     }
     
-    arg_names<- nnspline::create_nnspline |> formals() |> names()
+    arg_names<- nnspline::create_lcspline |> formals() |> names()
     spline_args<- call[names(call) %in% arg_names]
     num_time_mesh<- time_mesh |> 
         difftime(time_mesh[1], units = time_units) |>
         as.numeric()
     spline_args$x<- num_time_mesh |> utils::tail(-1)
-    spline<- nnspline::create_nnspline |> do.call(spline_args)
+    spline<- nnspline::create_lcspline |> do.call(spline_args)
     pings$spline_idx<- pings |> 
         _$date |> 
         cut(time_mesh, labels = FALSE, include.lowest = TRUE)
@@ -92,7 +94,9 @@ fit_track <- function(
     robopt_args$func <- nll
     n_coords<- pings |> sf::st_coordinates() |> ncol()
     robopt_args$parameters <- list(
-        spline_pars = matrix(0, nrow = 2, ncol = 2),
+        # spline_pars = matrix(0, nrow = 2, ncol = 2),
+        qstretch = numeric(2),
+        lheight = numeric(2),
         coordinates = matrix(
             pings |> sf::st_coordinates() |> apply(2, stats::median),
             nrow = time_mesh |> length(),
@@ -144,6 +148,8 @@ fit_track <- function(
     if( ping_equal_shape ) {
         map$working_ping_shape[]<- NA
     }
+    if( track_equal_stretch ) map$qstretch<- c(1, 1)
+    if( track_equal_height ) map$lheight<- c(1, 1)
 
     map <- map |> lapply(as.factor)
     robopt_args$map <- map
@@ -158,11 +164,11 @@ fit_track <- function(
         # If any observation error component is very small it can mess up sdreport
         #   So I'll fix them at their estimated value and re-run sdreport.
 
-        robopt_args$map$working_ping_diagonal <- 
-            (fit$par$working_ping_diagonal <= -5) |> 
+        robopt_args$map$working_ping_scale <- 
+            (fit$par$working_ping_scale <= -5) |> 
             ifelse(
                 NA,
-                fit$par$working_ping_diagonal |> seq_along()
+                fit$par$working_ping_scale |> seq_along()
             ) |>
             as.factor()
         robopt_args$map$robustness <- as.factor(NA)
