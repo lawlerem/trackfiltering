@@ -22,9 +22,9 @@ nll<- function(pars) {
     ll<- 0
 
     # Track likelihood and predictions
-    spline<- spline |> update_parameters(exp(spline_pars[, 1]))
     ll<- ll + RTMB::dflat(coordinates[1, 1], log = TRUE)
     ll<- ll + RTMB::dflat(coordinates[1, 2], log = TRUE)
+    spline<- spline |> update_parameters(exp(spline_pars[, 1]))
     ll<- ll + nnspline::dspline(
         diff(coordinates[, 1]) / diff(num_time_mesh),
         spline,
@@ -50,6 +50,8 @@ nll<- function(pars) {
         lapply(
             function(q) {
                 orient<- working_ping_orientation[, q] |> theta2cor()
+                # orient<- (2 * RTMB::plogis(working_ping_orientation[1, q]) - 1) |>
+                #     (\(x) RTMB::matrix(RTMB::c(1, x, x, 1), ncol = 2))()
                 shape<- working_ping_shape[, q] |>
                     exp() |>
                     (\(x) RTMB::diag(c(RTMB::AD(1), x)))()
