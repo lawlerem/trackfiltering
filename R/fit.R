@@ -60,7 +60,7 @@ fit_track <- function(
         ping_common_shape = TRUE,
         ping_equal_shape = FALSE,
         track_equal_stretch = TRUE,
-        track_equal_height = FALSE,
+        track_equal_height = TRUE,
         ...
     ) {
     call <- match.call(expand.dots = TRUE) |> as.list()
@@ -82,7 +82,7 @@ fit_track <- function(
     num_time_mesh<- time_mesh |> 
         difftime(time_mesh[1], units = time_units) |>
         as.numeric()
-    spline_args$x<- num_time_mesh |> utils::tail(-1)
+    spline_args$x<- num_time_mesh |> utils::head(-1)
     spline<- nnspline::create_lcspline |> do.call(spline_args)
     pings$spline_idx<- pings |> 
         _$date |> 
@@ -155,7 +155,7 @@ fit_track <- function(
     robopt_args$map <- map
     robopt_args$random <- "coordinates"
     robopt_args$smooth <- "coordinates"
-    robopt_args$nodes <- time_mesh
+    robopt_args$nodes <- num_time_mesh
     ping_coordinates<- sf::st_coordinates(pings)
     fit <- robustifyRTMB::robustly_optimize |> do.call(robopt_args)
 

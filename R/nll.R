@@ -53,6 +53,8 @@ nll<- function(pars) {
         lapply(
             function(q) {
                 orient<- working_ping_orientation[, q] |> theta2cor()
+                # orient<- (2 * RTMB::plogis(working_ping_orientation[1, q]) - 1) |>
+                #     (\(x) RTMB::matrix(RTMB::c(1, x, x, 1), ncol = 2))()
                 shape<- working_ping_shape[, q] |>
                     exp() |>
                     (\(x) RTMB::diag(c(RTMB::AD(1), x)))()
